@@ -371,7 +371,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-market-data", editable = "../pydantic-market-data" },
+    { name = "pydantic-market-data" },
     { name = "requests", specifier = ">=2.32.5" },
 ]
 
@@ -476,26 +476,16 @@ wheels = [
 [[package]]
 name = "pydantic-market-data"
 version = "0.1.6"
-source = { editable = "../pydantic-market-data" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pandas" },
     { name = "pycountry" },
     { name = "pydantic" },
     { name = "pydantic-extra-types" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "pandas", specifier = ">=3.0.0" },
-    { name = "pycountry", specifier = ">=24.6.1" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pydantic-extra-types", specifier = ">=2.11.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
+sdist = { url = "https://files.pythonhosted.org/packages/55/8a/74ec80fa42b25057edeca4bdeea7af0d9c8380def97748e4f459bc6a2097/pydantic_market_data-0.1.6.tar.gz", hash = "sha256:021cebd3b4cc20fbc40bcd5f20e4275520da21b7f6a9056b7cf8db1be1d64578", size = 36938, upload-time = "2026-01-31T09:10:05.523Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/33/7b745fa3c02046f8e554ef48462574627761c4e7208598578660ffaf5747/pydantic_market_data-0.1.6-py3-none-any.whl", hash = "sha256:8baf8eb30dabdcc3377587cc94b1611860aa6482a878acf2f080daa5a17ed6f3", size = 5401, upload-time = "2026-01-31T09:10:06.284Z" },
 ]
 
 [[package]]

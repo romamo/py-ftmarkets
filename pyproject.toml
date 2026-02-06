@@ -25,9 +25,6 @@ dependencies = [
     "pydantic-market-data",
 ]
 
-[tool.uv.sources]
-pydantic-market-data = { path = "../pydantic-market-data", editable = true }
-
 [project.urls]
 Homepage = "https://github.com/romamo/ftfinance"
 Repository = "https://github.com/romamo/ftfinance"
