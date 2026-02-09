@@ -7,4 +7,4 @@ from .api import search as search
 
 __all__ = ["OHLCV", "History", "Symbol", "FTDataSource", "history", "resolve_ticker", "search"]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
