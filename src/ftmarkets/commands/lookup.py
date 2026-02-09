@@ -34,7 +34,6 @@ def handle(args):
         isin=args.isin,
         symbol=args.symbol,
         description=args.desc,
-        preferred_exchanges=preferred,
         target_price=args.price,
         target_date=args.date,
         currency=args.currency,

@@ -21,7 +21,7 @@ def setup_parser(subparsers):
 def handle(args):
     preferred = [args.exchange] if args.exchange else None
 
-    ticker_str = api.resolve_ticker(
+    symbols = api.resolve_ticker(
         isin=args.isin,
         symbol=args.symbol,
         description=args.desc,
@@ -30,12 +30,13 @@ def handle(args):
         target_date=args.date,
     )
 
-    if not ticker_str:
+    if not symbols:
         print("Could not resolve ticker.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Resolved to: {ticker_str}")
-    hist = api.history(ticker_str, period=args.period)
+    ticker = symbols[0].ticker
+    print(f"Resolved to: {ticker}")
+    hist = api.history(ticker, period=args.period)
     df = hist.to_pandas()
 
     if df.empty:

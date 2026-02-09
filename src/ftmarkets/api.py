@@ -145,11 +145,44 @@ def _map_country_to_code(country_name: str | None) -> str | None:
     return mapping.get(country_name, None)
 
 
+def _get_period_for_date(target_date: datetime | date | str) -> str:
+    """
+    Determines the necessary FT history period for a target date.
+    """
+    dt = None
+    if isinstance(target_date, str):
+        for fmt in ("%Y-%m-%d", "%Y%m%d"):
+            try:
+                dt = datetime.strptime(target_date, fmt)
+                break
+            except ValueError:
+                pass
+    elif isinstance(target_date, date) and not isinstance(target_date, datetime):
+        dt = datetime.combine(target_date, datetime.min.time())
+    else:
+        dt = target_date
+
+    if not dt:
+        return "3mo"  # Default fallback
+
+    days_diff = (datetime.now() - dt).days
+    if days_diff > 365 * 5:
+        return "10y"
+    elif days_diff > 365 * 2:
+        return "5y"
+    elif days_diff > 365:
+        return "3y"
+    elif days_diff > 180:
+        return "1y"
+    elif days_diff > 90:
+        return "6mo"
+    return "3mo"
+
+
 def resolve_ticker(
     isin: str | None = None,
     symbol: str | None = None,
     description: str | None = None,
-    preferred_exchanges: list[str] | None = None,
     target_price: float | None = None,
     target_date: str | None = None,
     currency: str | None = None,
@@ -200,20 +233,6 @@ def resolve_ticker(
     # 3. Sorting (Preferences) - Moved before validation for early exit optimization
     def match_score(cand):
         score = 0
-        # Factor A: Exchange Priority
-        if preferred_exchanges:
-            prefs_lower = [p.lower() for p in preferred_exchanges]
-            cand_exc = (cand.exchange or "").lower()
-            cand_sym = cand.ticker.lower()
-            found_exc = False
-            for i, p in enumerate(prefs_lower):
-                if p in cand_exc or p in cand_sym:
-                    score += i
-                    found_exc = True
-                    break
-            if not found_exc:
-                score += len(prefs_lower)
-
         # Factor B: Currency Match (Highest priority after exchange if not already filtered)
         if currency:
             if cand.ticker.upper().endswith(f":{currency.upper()}"):
@@ -224,59 +243,66 @@ def resolve_ticker(
     filtered.sort(key=match_score)
 
     # 4. Validation (Price)
-    # If price and date are provided, we only keep candidates that traded near that price.
-    if target_price and target_date:
+    # If price is provided, we use it to filter and rank candidates.
+    if target_price:
         validated = []
+        search_date = target_date if target_date else datetime.now().strftime("%Y-%m-%d")
+        val_period = _get_period_for_date(search_date)
 
-        # Determine necessary history period
-        val_period = "3mo"
-        try:
-            target_dt = None
-            for fmt in ("%Y-%m-%d", "%Y%m%d"):
-                try:
-                    target_dt = datetime.strptime(target_date, fmt)
-                    break
-                except ValueError:
-                    pass
-            if target_dt:
-                days_diff = (datetime.now() - target_dt).days
-                if days_diff > 365 * 5:
-                    val_period = "10y"
-                elif days_diff > 365 * 2:
-                    val_period = "5y"
-                elif days_diff > 365:
-                    val_period = "3y"
-                elif days_diff > 180:
-                    val_period = "1y"
-                elif days_diff > 90:
-                    val_period = "6mo"
-        except Exception:
-            pass
+        candidates_with_prices = []
 
         for cand in filtered:
             try:
                 hist = history(cand.ticker, period=val_period)
-                dt = target_dt
-                if not dt:
+                dt = None
+                if isinstance(search_date, str):
                     for fmt in ("%Y-%m-%d", "%Y%m%d"):
                         try:
-                            dt = datetime.strptime(target_date, fmt)
+                            dt = datetime.strptime(search_date, fmt)
                             break
                         except ValueError:
                             pass
+                elif isinstance(search_date, date) and not isinstance(search_date, datetime):
+                    dt = datetime.combine(search_date, datetime.min.time())
+                else:
+                    dt = search_date
 
                 if not dt:
                     continue
 
+                # Check if price matches
                 match = _check_price_match_logic(hist, dt, target_price)
                 if match:
-                    validated.append(cand)
-                    # Early Exit: If we reached the limit, we can stop
-                    if limit > 0 and len(validated) >= limit:
-                        break
+                    # Calculate proximity score for ranking
+                    # Find the closest price in history
+                    price_proximity = 1.0
+                    df = hist.to_pandas()
+                    if not df.empty:
+                        target_ts = pd.Timestamp(dt).replace(tzinfo=None).normalize()
+                        row = None
+                        if target_ts in df.index:
+                            row = df.loc[target_ts]
+                        else:
+                            idx = df.index.get_indexer([target_ts], method="nearest")[0]
+                            if idx != -1:
+                                row = df.iloc[idx]
+                        
+                        if row is not None:
+                            actual_price = row.get("Close") or row.get("Open")
+                            if actual_price:
+                                price_proximity = abs(actual_price - target_price) / target_price
+                    
+                    candidates_with_prices.append((cand, price_proximity))
             except Exception:
                 continue
-        filtered = validated
+        
+        if candidates_with_prices:
+            # Sort by price proximity (lower is better)
+            candidates_with_prices.sort(key=lambda x: x[1])
+            filtered = [c[0] for c in candidates_with_prices]
+        else:
+            # If no price matches, we return empty to be safe
+            return []
 
     if not filtered:
         return []
@@ -463,13 +489,10 @@ class FTDataSource(DataSource):
         return search(query)
 
     def resolve(self, criteria: SecurityCriteria) -> Symbol | None:
-        # Note: SecurityCriteria in pydantic-market-data might not
-        # have preferred_exchanges yet. We use what's available.
         results = resolve_ticker(
             isin=criteria.isin,
             symbol=criteria.symbol,
             description=criteria.description,
-            preferred_exchanges=None,
             target_price=criteria.target_price,
             target_date=str(criteria.target_date) if criteria.target_date else None,
             currency=criteria.currency,
@@ -487,17 +510,18 @@ class FTDataSource(DataSource):
         Validates if the ticker traded near the target price on the target date.
         """
         try:
-            hist = self.history(ticker, period="3mo")
-            # Convert target_date to datetime if it's a date or str
+            period = _get_period_for_date(target_date)
+            hist = self.history(ticker, period=period)
+            
+            dt = None
             if isinstance(target_date, str):
-                dt = None
                 for fmt in ("%Y-%m-%d", "%Y%m%d"):
                     try:
                         dt = datetime.strptime(target_date, fmt)
                         break
                     except ValueError:
                         pass
-            elif isinstance(target_date, date):
+            elif isinstance(target_date, date) and not isinstance(target_date, datetime):
                 dt = datetime.combine(target_date, datetime.min.time())
             else:
                 dt = target_date

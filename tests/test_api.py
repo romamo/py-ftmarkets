@@ -47,3 +47,18 @@ def test_resolve_with_price_validation():
     )
     assert len(results) > 0
     assert "4GLD" in results[0].ticker
+
+
+def test_validate_older_date():
+    # Test revalidation for a trade from Oct 2025 (more than 100 days ago)
+    ds = api.FTDataSource()
+    # LU1900066033: AMUNDI MSCI SEMICONDUCTORS E (CHIP:PAR:EUR)
+    # Price on 2025-10-16 was around 68.50
+    # Note: Using date object to test that path as well
+    from datetime import date
+    target_date = date(2025, 10, 16)
+    target_price = 68.50
+    ticker = "CHIP:PAR:EUR"
+    
+    is_valid = ds.validate(ticker, target_date, target_price)
+    assert is_valid is True
