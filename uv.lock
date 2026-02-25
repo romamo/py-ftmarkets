@@ -965,7 +965,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-market-data", editable = "../pydantic-market-data" },
+    { name = "pydantic-market-data", specifier = ">=0.1.11" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "requests", specifier = ">=2.32.5" },
 ]
@@ -1141,7 +1141,7 @@ wheels = [
 [[package]]
 name = "pydantic-market-data"
 version = "0.1.14"
-source = { editable = "../pydantic-market-data" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -1150,24 +1150,9 @@ dependencies = [
     { name = "pydantic-extra-types" },
     { name = "pydantic-settings" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "pandas", specifier = ">=2.2.0" },
-    { name = "pycountry", specifier = ">=24.6.1" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pydantic-extra-types", specifier = ">=2.11.0" },
-    { name = "pydantic-settings", specifier = ">=2.7.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "bandit", specifier = ">=1.8.3" },
-    { name = "mypy", specifier = ">=1.15.0" },
-    { name = "pandas-stubs" },
-    { name = "pytest" },
-    { name = "pytest-cov", specifier = ">=6.0.0" },
-    { name = "ruff" },
+sdist = { url = "https://files.pythonhosted.org/packages/92/51/0f14c13bcb8729dafc4f8eab4a912daf8cb5674698d44591fe37db7bddac/pydantic_market_data-0.1.14.tar.gz", hash = "sha256:b772f12773f8f913788d5f338fb2b66233a232a16e8797dd2d68c000f5f5615e", size = 90632, upload-time = "2026-02-22T15:06:49.254Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/6d/d6ecb32ff775f7a0a6fbb3ca6a44df3ce11909d619e057b0fdf0815f0cbe/pydantic_market_data-0.1.14-py3-none-any.whl", hash = "sha256:3c44589e48464852cefcd75ce148b832f6ec0fefd16e6641ca5d85d07791e4b2", size = 9064, upload-time = "2026-02-22T15:06:50.31Z" },
 ]
 
 [[package]]
