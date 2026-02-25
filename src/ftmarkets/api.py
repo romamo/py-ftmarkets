@@ -164,9 +164,7 @@ class FTDataSource(DataSource):
         days_diff = (datetime.now() - target_date).days
         return max(days_diff + 5, 30)
 
-    def _find_nearest_candle(
-        self, history: History, target_date
-    ):
+    def _find_nearest_candle(self, history: History, target_date):
         """Return the OHLCV candle closest to target_date within _PRICE_LOOKUP_WINDOW_DAYS."""
         # Exact match first
         for c in history.candles:

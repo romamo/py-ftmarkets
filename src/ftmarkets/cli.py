@@ -31,11 +31,7 @@ def setup_logging(v: bool, vv: bool):
         fmt = "%(message)s"
 
     logging.basicConfig(
-        level=level, 
-        format=fmt, 
-        datefmt="%Y-%m-%d %H:%M:%S", 
-        stream=sys.stderr, 
-        force=True
+        level=level, format=fmt, datefmt="%Y-%m-%d %H:%M:%S", stream=sys.stderr, force=True
     )
 
     if verbosity < 2:
@@ -76,7 +72,7 @@ class AppCLI(BaseSettings, GlobalArgs):
     def cli_cmd(self) -> None:
         v_main = self.v
         vv_main = self.vv
-        
+
         # In pydantic-settings, the subcommand is stored in the field name
         # but CliApp might also set 'subcommand' attribute if configured or by convention.
         sub = getattr(self, "subcommand", None)
@@ -85,13 +81,13 @@ class AppCLI(BaseSettings, GlobalArgs):
                 sub = self.lookup
             elif getattr(self, "history", None):
                 sub = self.history
-        
+
         v_sub = getattr(sub, "v", False) if sub else False
         vv_sub = getattr(sub, "vv", False) if sub else False
-        
+
         v = v_main or v_sub
         vv = vv_main or vv_sub
-        
+
         setup_logging(v, vv)
         CliApp.run_subcommand(self)
 
