@@ -1,85 +1,80 @@
+import logging
 import sys
 
-import pandas as pd
+from pydantic_market_data.cli_models import HistoryArgs
+from pydantic_market_data.models import HistoryPeriod, Price, PriceVerificationError, StrictDate
 
 from .. import api
 from ..utils import parse_date
 
-
-def setup_parser(subparsers):
-    parser = subparsers.add_parser("history", help="Fetch history and validate")
-    parser.add_argument("--isin", help="ISIN of the security")
-    parser.add_argument("--symbol", help="Symbol")
-    parser.add_argument("--desc", help="Description")
-    parser.add_argument("--exchange", help="Preferred exchange")
-    parser.add_argument("--period", default="1mo", help="Period (e.g. 1mo, 1y)")
-    parser.add_argument("--price", type=float, help="Validation price")
-    parser.add_argument("--date", help="Validation date")
-    parser.set_defaults(func=handle)
+logger = logging.getLogger(__name__)
 
 
-def handle(args):
-    preferred = [args.exchange] if args.exchange else None
+class HistoryCommand(HistoryArgs):
+    """Fetch history and validate"""
 
-    symbols = api.resolve_ticker(
-        isin=args.isin,
-        symbol=args.symbol,
-        description=args.desc,
-        preferred_exchanges=preferred,
-        target_price=args.price,
-        target_date=args.date,
-    )
+    def cli_cmd(self) -> None:
+        ds = api.FTDataSource()
+        target_dt = parse_date(self.date) if self.date else None
 
-    if not symbols:
-        print("Could not resolve ticker.", file=sys.stderr)
-        sys.exit(1)
+        target_date_vo = StrictDate(root=target_dt) if target_dt else None
+        target_price_vo = Price(root=self.price) if self.price else None
 
-    ticker = symbols[0].ticker
-    print(f"Resolved to: {ticker}")
-    hist = api.history(ticker, period=args.period)
-    df = hist.to_pandas()
+        # Use SecurityCriteria to resolve
+        criteria = api.SecurityCriteria(
+            isin=self.isin,
+            symbol=self.ticker,
+            description=self.desc,
+            target_price=target_price_vo,
+            target_date=target_date_vo.root if target_date_vo else None,
+        )
 
-    if df.empty:
-        print("No history found.", file=sys.stderr)
-        sys.exit(1)
+        sym = ds.resolve(criteria)
 
-    print(df.tail())
-
-    if args.price and args.date:
-        target_dt = parse_date(args.date)
-        if not target_dt:
-            print(f"Invalid date: {args.date}", file=sys.stderr)
+        if not sym:
+            logger.error("Could not resolve ticker.")
             sys.exit(1)
 
-        target_ts = pd.Timestamp(target_dt)
-        row = None
-        if target_ts in df.index:
-            row = df.loc[target_ts]
+        ticker = sym.ticker
+        print(f"Resolved to: {ticker}")
+
+        # safely parse HistoryPeriod
+        try:
+            enum_period = HistoryPeriod(self.period)
+        except ValueError:
+            valid_periods = [p.value for p in HistoryPeriod]
+            logger.error(f"Invalid period '{self.period}'. Valid: {valid_periods}")
+            sys.exit(1)
+
+        hist = ds.history(ticker, period=enum_period)
+        df = hist.to_pandas()
+
+        if df.empty:
+            logger.error("No history found.")
+            sys.exit(1)
+
+        if self.format == "json":
+            print(hist.model_dump_json(indent=2))
         else:
-            idx = df.index.get_indexer([target_ts], method="nearest")[0]
-            if idx != -1:
-                actual_ts = df.index[idx]
-                if abs((actual_ts - target_ts).days) <= 3:
-                    row = df.iloc[idx]
-                    print(f"Using nearest data from {actual_ts.date()}")
+            print(df.tail())
 
-        if row is None:
-            print(f"Date {args.date} not found in history.", file=sys.stderr)
-            sys.exit(1)
+        if self.price and self.date:
+            target_dt = parse_date(self.date)
+            if not target_dt:
+                logger.error("Invalid date: %s", self.date)
+                sys.exit(1)
 
-        high, low, close_ = row.get("High"), row.get("Low"), row.get("Close")
-        passed = False
-        if pd.notna(high) and pd.notna(low):
-            passed = low <= args.price <= high
-        elif pd.notna(close_):
-            passed = (abs(close_ - args.price) / args.price) < 0.05
-
-        if passed:
-            print("VALIDATION PASSED")
-        else:
-            msg = (
-                f"VALIDATION FAILED (Open={row.get('Open')}, "
-                f"High={high}, Low={low}, Close={close_})"
-            )
-            print(msg)
-            sys.exit(1)
+            try:
+                if ds.validate(ticker, target_dt, Price(root=self.price)):
+                    print("VALIDATION PASSED")
+                else:
+                    logger.error("VALIDATION FAILED")
+                    sys.exit(1)
+            except PriceVerificationError as e:
+                range_str = (
+                    f"{e.actual_low:.2f} - {e.actual_high:.2f}"
+                    if e.actual_low is not None and e.actual_high is not None
+                    else str(e)
+                )
+                logger.error("VALIDATION FAILED (Matched range: %s)", range_str)
+                sys.exit(1)

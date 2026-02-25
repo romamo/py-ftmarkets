@@ -38,10 +38,6 @@ class FTClient:
 
     def get(self, path: str, params: dict[str, Any] | None = None, **kwargs) -> requests.Response:
         url = f"{self.BASE_URL}{path}" if path.startswith("/") else path
-        # If full URL passed (e.g. for scraping), handle it
-        if path.startswith("http"):
-            url = path
-
         kwargs.setdefault("timeout", 10)  # default 10s timeout
         return self.session.get(url, params=params, **kwargs)
 

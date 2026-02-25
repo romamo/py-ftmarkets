@@ -1,534 +1,235 @@
-import html as html_lib
-import json
-import re
+import logging
 from datetime import date, datetime
-from typing import Any
-from urllib.parse import parse_qs, urlparse
 
-import pandas as pd
-from lxml import html
 from pydantic_market_data.interfaces import DataSource
-from pydantic_market_data.models import OHLCV, History, SecurityCriteria, Symbol
-
-from .client import client
-
-
-def search(query: str) -> list[Symbol]:
-    """
-    Search for a security by ISIN, symbol, or name.
-    """
-    url = "/data/search"
-    response = client.get(url, params={"query": query})
-    response.raise_for_status()
-
-    tree = html.fromstring(response.content)
-
-    # Mapping for FT tab IDs/names to standard types
-    asset_class_map = {
-        "etf-panel": "ETF",
-        "equity-panel": "Equity",
-        "fund-panel": "Fund",
-        "index-panel": "Index",
-        "ETFs": "ETF",
-        "Equities": "Equity",
-        "Funds": "Fund",
-        "Indices": "Index",
-        "Indicies": "Index",
-    }
-
-    results = []
-
-    # The search results are grouped by asset class in tab panels or sections
-    xpath_query = '//div[@role="tabpanel"] | //div[contains(@class, "mod-search-results__section")]'
-    panels = tree.xpath(xpath_query)
-    if not panels:
-        # Fallback for direct redirect or simple structure
-        if "tearsheet" in response.url:
-            # ... existing redirect logic ...
-            parsed = urlparse(response.url)
-            qs = parse_qs(parsed.query)
-            symbol_code = qs.get("s", [None])[0]
-            if symbol_code:
-                name_el = tree.xpath('//h1[@class="mod-tearsheet-overview__header__name"]')
-                name = name_el[0].text.strip() if name_el else query
-                return [Symbol(ticker=symbol_code, name=name)]
-        panels = [tree]
-
-    for panel in panels:
-        # Identify asset class from ID or header
-        panel_id = panel.get("id")
-        asset_type = asset_class_map.get(panel_id)
-
-        if not asset_type:
-            header = panel.xpath(".//h3")
-            ft_name = header[0].text.strip() if header else None
-            asset_type = asset_class_map.get(ft_name, ft_name)
-
-        rows = panel.xpath('.//table[contains(@class, "mod-ui-table")]/tbody/tr')
-        for row in rows:
-            cols = row.xpath("./td")
-            if len(cols) >= 2:
-                name = cols[0].text_content().strip()
-                ticker = cols[1].text_content().strip()
-                exchange = cols[2].text_content().strip() if len(cols) > 2 else None
-                country = cols[3].text_content().strip() if len(cols) > 3 else None
-
-                if ticker:
-                    country_code = _map_country_to_code(country)
-
-                    # Currency extraction from ticker: "4GLD:GER:EUR" -> "EUR"
-                    # Note: FT tickers are variable format, often SYMBOL:EXCHANGE:CURRENCY
-                    currency = None
-                    ticker_parts = ticker.split(":")
-                    if len(ticker_parts) >= 3:
-                        # If there are 3 parts, the last one is likely the currency
-                        last_part = ticker_parts[-1].upper()
-                        if len(last_part) == 3 and last_part.isalpha():
-                            currency = last_part
-
-                    try:
-                        sym = Symbol(
-                            ticker=ticker,
-                            name=name,
-                            exchange=exchange,
-                            country=country_code,
-                            currency=currency,
-                            asset_class=asset_type,
-                        )
-                    except Exception:
-                        # If validation fails, try a more lenient approach
-                        sym = Symbol(
-                            ticker=ticker,
-                            name=name,
-                            exchange=exchange,
-                            country=country_code,
-                            currency=None,
-                            asset_class=asset_type,
-                        )
-
-                    results.append(sym)
-
-    return results
-
-
-def _map_country_to_code(country_name: str | None) -> str | None:
-    if not country_name:
-        return None
-
-    # Common mappings
-    mapping = {
-        "United Kingdom": "GB",
-        "United States": "US",
-        "France": "FR",
-        "Germany": "DE",
-        "Canada": "CA",
-        "Italy": "IT",
-        "Spain": "ES",
-        "Netherlands": "NL",
-        "Australia": "AU",
-        "Japan": "JP",
-        "Switzerland": "CH",
-        "Sweden": "SE",
-        "Belgium": "BE",
-        "Ireland": "IE",
-        "Denmark": "DK",
-        "Finland": "FI",
-        "Norway": "NO",
-        "Portugal": "PT",
-        "Hong Kong": "HK",
-        "Singapore": "SG",
-        "China": "CN",
-        "India": "IN",
-    }
-
-    # Return None if not mapped to avoid validation error for unknown names
-    return mapping.get(country_name, None)
-
-
-def _get_period_for_date(target_date: datetime | date | str) -> str:
-    """
-    Determines the necessary FT history period for a target date.
-    """
-    dt = None
-    if isinstance(target_date, str):
-        for fmt in ("%Y-%m-%d", "%Y%m%d"):
-            try:
-                dt = datetime.strptime(target_date, fmt)
-                break
-            except ValueError:
-                pass
-    elif isinstance(target_date, date) and not isinstance(target_date, datetime):
-        dt = datetime.combine(target_date, datetime.min.time())
-    else:
-        dt = target_date
-
-    if not dt:
-        return "3mo"  # Default fallback
-
-    days_diff = (datetime.now() - dt).days
-    if days_diff > 365 * 5:
-        return "10y"
-    elif days_diff > 365 * 2:
-        return "5y"
-    elif days_diff > 365:
-        return "3y"
-    elif days_diff > 180:
-        return "1y"
-    elif days_diff > 90:
-        return "6mo"
-    return "3mo"
-
-
-def resolve_ticker(
-    isin: str | None = None,
-    symbol: str | None = None,
-    description: str | None = None,
-    target_price: float | None = None,
-    target_date: str | None = None,
-    currency: str | None = None,
-    country: str | None = None,
-    asset_class: str | None = None,
-    limit: int = 1,
-) -> list[Symbol]:
-    """
-    Enhanced resolve_ticker that returns a list of matching Symbols.
-    """
-    candidates = []
-
-    # 1. Search Strategy
-    if isin:
-        candidates = search(isin)
-    if not candidates and symbol:
-        candidates = search(symbol)
-    if not candidates and description:
-        candidates = search(description)
-
-    if not candidates:
-        return []
-
-    # 2. Filtering
-    filtered = []
-    for cand in candidates:
-        # Currency Filter
-        if currency:
-            if not cand.currency or str(cand.currency).upper() != currency.upper():
-                continue
-
-        # Country Filter
-        if country:
-            if not cand.country or str(cand.country).upper() != country.upper():
-                continue
-
-        # Asset Class Filter
-        if asset_class:
-            cand_asset = getattr(cand, "asset_class", None)
-            if not cand_asset or cand_asset.upper() != asset_class.upper():
-                continue
-
-        filtered.append(cand)
-
-    if not filtered:
-        return []
-
-    # 3. Sorting (Preferences) - Moved before validation for early exit optimization
-    def match_score(cand):
-        score = 0
-        # Factor B: Currency Match (Highest priority after exchange if not already filtered)
-        if currency:
-            if cand.ticker.upper().endswith(f":{currency.upper()}"):
-                score -= 100
-
-        return score
-
-    filtered.sort(key=match_score)
-
-    # 4. Validation (Price)
-    # If price is provided, we use it to filter and rank candidates.
-    if target_price:
-        validated = []
-        search_date = target_date if target_date else datetime.now().strftime("%Y-%m-%d")
-        val_period = _get_period_for_date(search_date)
-
-        candidates_with_prices = []
-
-        for cand in filtered:
-            try:
-                hist = history(cand.ticker, period=val_period)
-                dt = None
-                if isinstance(search_date, str):
-                    for fmt in ("%Y-%m-%d", "%Y%m%d"):
-                        try:
-                            dt = datetime.strptime(search_date, fmt)
-                            break
-                        except ValueError:
-                            pass
-                elif isinstance(search_date, date) and not isinstance(search_date, datetime):
-                    dt = datetime.combine(search_date, datetime.min.time())
-                else:
-                    dt = search_date
-
-                if not dt:
-                    continue
-
-                # Check if price matches
-                match = _check_price_match_logic(hist, dt, target_price)
-                if match:
-                    # Calculate proximity score for ranking
-                    # Find the closest price in history
-                    price_proximity = 1.0
-                    df = hist.to_pandas()
-                    if not df.empty:
-                        target_ts = pd.Timestamp(dt).replace(tzinfo=None).normalize()
-                        row = None
-                        if target_ts in df.index:
-                            row = df.loc[target_ts]
-                        else:
-                            idx = df.index.get_indexer([target_ts], method="nearest")[0]
-                            if idx != -1:
-                                row = df.iloc[idx]
-                        
-                        if row is not None:
-                            actual_price = row.get("Close") or row.get("Open")
-                            if actual_price:
-                                price_proximity = abs(actual_price - target_price) / target_price
-                    
-                    candidates_with_prices.append((cand, price_proximity))
-            except Exception:
-                continue
-        
-        if candidates_with_prices:
-            # Sort by price proximity (lower is better)
-            candidates_with_prices.sort(key=lambda x: x[1])
-            filtered = [c[0] for c in candidates_with_prices]
-        else:
-            # If no price matches, we return empty to be safe
-            return []
-
-    if not filtered:
-        return []
-
-    # 5. Limit
-    if limit > 0:
-        return filtered[:limit]
-
-    return filtered
-
-
-def history(ticker: str, period: str = "1mo") -> History:
-    """
-    Fetch historical data for a ticker.
-    Period options: '1d', '1mo', '3mo', '6mo', '1y', '3y', '5y', '10y', 'max'
-    """
-    # 1. Get Summary to find Internal ID (xid)
-    # Note: Optimization - we could cache this mapping
-    url_summary = f"/data/equities/tearsheet/summary?s={ticker}"
-    resp = client.get(url_summary)
-    resp.raise_for_status()
-
-    tree = html.fromstring(resp.content)
-
-    # Extract xid
-    xid = None
-    # Method A: data-mod-config
-    divs = tree.xpath("//div[@data-mod-config]")
-    for div in divs:
-        try:
-            raw_cfg = div.get("data-mod-config")
-            if raw_cfg:
-                decoded_cfg = html_lib.unescape(raw_cfg)
-                cfg = json.loads(decoded_cfg)
-                if "xid" in cfg:
-                    xid = cfg["xid"]
-                    break
-        except (ValueError, KeyError, json.JSONDecodeError):
-            pass
-
-    if not xid:
-        # Method B: Regex (Handle potentially escaped quotes)
-        # Matches: xid:"123" or xid="123" or "xid":"123"
-        # Also handle &quot;
-        # Look for xid followed by colon/equals, optional quotes, and digits
-        regex = r'(?:xid|&quot;xid&quot;)\s*[:=]\s*(?:["\']|&quot;)?(\d+)(?:["\']|&quot;)?'
-        match = re.search(regex, resp.text)
-        if match:
-            xid = match.group(1)
-
-    if not xid:
-        raise ValueError(f"Could not determine internal FT ID for ticker {ticker}")
-
-    # 2. Fetch Series Data
-    # Map period to days
-    days_map = {
-        "1d": 2,  # safety
-        "1mo": 35,
-        "3mo": 100,
-        "6mo": 200,
-        "1y": 365,
-        "3y": 365 * 3,
-        "5y": 365 * 5,
-        "10y": 365 * 10,
-        "max": 365 * 30,
-    }
-    days = days_map.get(period, 365)
-
-    payload = {
-        "days": days,
-        "dataNormalized": False,
-        "dataPeriod": "Day",
-        "dataInterval": 1,
-        "realtime": False,
-        "yFormat": "0.###",
-        "timeServiceFormat": "JSON",
-        "returnDateType": "ISO8601",
-        "elements": [{"Type": "price", "Symbol": xid}, {"Type": "volume", "Symbol": xid}],
-    }
-
-    resp_series = client.post("/data/chartapi/series", json=payload)
-    resp_series.raise_for_status()
-
-    data = resp_series.json()
-
-    # 3. Parse Response
-    candles = []
-    dates = data.get("Dates", [])
-    elements = data.get("Elements", [])
-
-    if not dates or not elements:
-        return History(symbol=Symbol(ticker=ticker, name=ticker), candles=[])
-
-    # Find Price and Volume components
-    price_comp = next((e for e in elements if e.get("Type") == "price"), None)
-    vol_comp = next((e for e in elements if e.get("Type") == "volume"), None)
-
-    if not price_comp:
-        return History(symbol=Symbol(ticker=ticker, name=ticker), candles=[])
-
-    ohlc = price_comp.get("ComponentSeries", [])
-    volumes = vol_comp.get("ComponentSeries", []) if vol_comp else []
-
-    # Let's extract vectors first
-    highs = next((s["Values"] for s in ohlc if s["Type"] == "High"), [])
-    lows = next((s["Values"] for s in ohlc if s["Type"] == "Low"), [])
-    opens = next((s["Values"] for s in ohlc if s["Type"] == "Open"), [])
-    closes = next((s["Values"] for s in ohlc if s["Type"] == "Close"), [])
-    vols = next((s["Values"] for s in volumes if s["Type"] == "Volume"), [])
-
-    for i, d_str in enumerate(dates):
-        dt = datetime.fromisoformat(d_str)
-        c_open = opens[i] if i < len(opens) else None
-        c_high = highs[i] if i < len(highs) else None
-        c_low = lows[i] if i < len(lows) else None
-        c_close = closes[i] if i < len(closes) else None
-        c_vol = vols[i] if i < len(vols) else None
-
-        candles.append(
-            OHLCV(date=dt, open=c_open, high=c_high, low=c_low, close=c_close, volume=c_vol)
-        )
-
-    # Try to extract real name from earlier response?
-    # We don't have it easily here without another request or parsing summary more.
-    # Ticker defaults to just ticker string for now.
-    sym = Symbol(ticker=ticker, name=ticker)
-
-    return History(symbol=sym, candles=candles)
-
-
-def _check_price_match_logic(history: History, target_dt: datetime, target_price: float) -> bool:
-    """Internal helper for validation logic"""
-    # Convert to DataFrame for easier lookups or iterate
-    # Let's iterate efficiently
-    # Find exact date
-    match_row = None
-    target_ts = pd.Timestamp(target_dt)
-
-    # Check exact date (ignoring time)
-    for c in history.candles:
-        if pd.Timestamp(c.date).date() == target_ts.date():
-            match_row = c
-            break
-
-    # Fallback: Nearest (within 3 days)
-    if not match_row:
-        # Sort by diff
-        candidates = []
-        for c in history.candles:
-            diff = abs((pd.Timestamp(c.date).date() - target_ts.date()).days)
-            if diff <= 3:
-                candidates.append((diff, c))
-
-        if candidates:
-            # Sort by diff
-            candidates.sort(key=lambda x: x[0])
-            match_row = candidates[0][1]
-
-    if not match_row:
-        return False
-
-    # Range Check
-    if match_row.high is not None and match_row.low is not None:
-        if match_row.low <= target_price <= match_row.high:
-            return True
-        else:
-            return False  # Strict range check
-
-    # Close Check
-    if match_row.close is not None:
-        diff = abs(match_row.close - target_price)
-        pct = diff / target_price
-        return pct < 0.05
-
-    return False
+from pydantic_market_data.models import (
+    OHLCV,
+    History,
+    HistoryPeriod,
+    Price,
+    PriceVerificationError,
+    SecurityCriteria,
+    StrictDate,
+    Symbol,
+    Ticker,
+)
+
+from .extract.scraper import Scraper, scraper
+
+# Re-export needed models for CLI
+__all__ = ["FTDataSource", "History", "OHLCV", "SecurityCriteria", "Symbol"]
+
+logger = logging.getLogger(__name__)
+
+_PRICE_LOOKUP_WINDOW_DAYS = 5  # Covers weekends + public holidays
 
 
 class FTDataSource(DataSource):
     """
     Financial Times (markets.ft.com) data source implementation.
+    Delegates to strict Scraper.
     """
 
+    def __init__(self, scraper_instance: Scraper | None = None):
+        self.scraper = scraper_instance or scraper
+
     def search(self, query: str) -> list[Symbol]:
-        return search(query)
+        return self.scraper.search(query)
 
     def resolve(self, criteria: SecurityCriteria) -> Symbol | None:
-        results = resolve_ticker(
-            isin=criteria.isin,
-            symbol=criteria.symbol,
-            description=criteria.description,
-            target_price=criteria.target_price,
-            target_date=str(criteria.target_date) if criteria.target_date else None,
-            currency=criteria.currency,
-            limit=1,
+        """
+        Resolve a security based on criteria.
+        Checks for ISIN, Symbol, Description.
+        Validates against Price/Date if provided.
+        """
+        candidates: list[Symbol] = []
+        if criteria.isin:
+            candidates = self.scraper.search(str(criteria.isin))
+        if not candidates and criteria.symbol:
+            candidates = self.scraper.search(str(criteria.symbol))
+        if not candidates and criteria.description:
+            candidates = self.scraper.search(str(criteria.description))
+
+        if not candidates:
+            return None
+
+        filtered = []
+        for cand in candidates:
+            # Currency Check
+            if criteria.currency:
+                cand_curr = str(cand.currency).upper() if cand.currency else None
+                if cand_curr != str(criteria.currency).upper():
+                    logger.debug(
+                        "Skipping candidate %s due to currency mismatch: %s != %s",
+                        cand.ticker,
+                        cand_curr,
+                        criteria.currency,
+                    )
+                    continue
+
+            filtered.append(cand)
+
+        if not filtered:
+            return None
+
+        # Price validation
+        if criteria.target_price:
+            target_dt = self._ensure_datetime(criteria.target_date)
+            days = self._get_required_history_days(target_dt)
+
+            tp = criteria.target_price
+            target_pr = Price(root=float(tp)) if isinstance(tp, (int, float)) else tp
+
+            valid_candidates = []
+            for cand in filtered:
+                hist = self.scraper.get_history(cand.ticker, days=days)
+                try:
+                    if self._check_price_match(hist, target_dt, target_pr):
+                        valid_candidates.append(cand)
+                except PriceVerificationError:
+                    continue
+
+            if valid_candidates:
+                return valid_candidates[0]
+            return None
+
+        return filtered[0]
+
+    def get_price(self, ticker: Ticker | str, date: date | None = None) -> Price:
+        """
+        Get the price for a ticker (current or historical).
+        """
+        ticker_val = Ticker(root=ticker) if isinstance(ticker, str) else ticker
+        target_dt = self._ensure_datetime(date)
+        days = self._get_required_history_days(target_dt)
+        hist = self.scraper.get_history(ticker_val, days=days + 10)
+
+        target_date = target_dt.date()
+        match_range = self._find_nearest_candle(hist, target_date)
+
+        if match_range and match_range.close is not None:
+            return Price(root=float(match_range.close))
+
+        raise RuntimeError(
+            f"Could not retrieve price for ticker '{ticker_val.root}' on {target_date}"
         )
-        if results:
-            return results[0]
-        return None
 
-    def history(self, ticker: str, period: str = "1mo") -> History:
-        return history(ticker, period=period)
+    def history(self, ticker: Ticker | str, period: HistoryPeriod = HistoryPeriod.MO1) -> History:
+        ticker_val = Ticker(root=ticker) if isinstance(ticker, str) else ticker
+        # Convert period string to days
+        days_map = {
+            HistoryPeriod.D1: 2,
+            HistoryPeriod.D5: 7,
+            HistoryPeriod.MO1: 30,
+            HistoryPeriod.MO3: 90,
+            HistoryPeriod.MO6: 180,
+            HistoryPeriod.Y1: 365,
+            HistoryPeriod.Y2: 365 * 2,
+            HistoryPeriod.Y5: 365 * 5,
+            HistoryPeriod.Y10: 365 * 10,
+            HistoryPeriod.MAX: 365 * 20,
+        }
 
-    def validate(self, ticker: str, target_date: Any, target_price: float) -> bool:
+        days = days_map.get(period, 30)
+        return self.scraper.get_history(ticker_val, days=days)
+
+    def validate(
+        self, ticker: Ticker | str, target_date: date, target_price: Price | float
+    ) -> bool:
         """
         Validates if the ticker traded near the target price on the target date.
         """
-        try:
-            period = _get_period_for_date(target_date)
-            hist = self.history(ticker, period=period)
-            
-            dt = None
-            if isinstance(target_date, str):
-                for fmt in ("%Y-%m-%d", "%Y%m%d"):
-                    try:
-                        dt = datetime.strptime(target_date, fmt)
-                        break
-                    except ValueError:
-                        pass
-            elif isinstance(target_date, date) and not isinstance(target_date, datetime):
-                dt = datetime.combine(target_date, datetime.min.time())
-            else:
-                dt = target_date
+        ticker_val = Ticker(root=ticker) if isinstance(ticker, str) else ticker
+        if isinstance(target_price, (int, float)):
+            price_val = Price(root=float(target_price))
+        else:
+            price_val = target_price
 
-            if not dt:
-                return False
+        target_dt = self._ensure_datetime(target_date)
+        days = self._get_required_history_days(target_dt)
+        # Fetch slightly more history to be safe
+        hist = self.scraper.get_history(ticker_val, days=days + 10)
 
-            return _check_price_match_logic(hist, dt, target_price)
-        except Exception:
+        return self._check_price_match(hist, target_dt, price_val)
+
+    # --- Internal Helpers ---
+
+    def _ensure_datetime(self, date_input: StrictDate.Input | None = None) -> datetime:
+        if date_input is None:
+            return datetime.now()
+        d = date_input.root if isinstance(date_input, StrictDate) else date_input
+        return datetime.combine(d, datetime.min.time())
+
+    def _get_required_history_days(self, target_date: datetime) -> int:
+        days_diff = (datetime.now() - target_date).days
+        return max(days_diff + 5, 30)
+
+    def _find_nearest_candle(
+        self, history: History, target_date
+    ):
+        """Return the OHLCV candle closest to target_date within _PRICE_LOOKUP_WINDOW_DAYS."""
+        # Exact match first
+        for c in history.candles:
+            c_dt = c.date if isinstance(c.date, datetime) else None
+            if c_dt and c_dt.date() == target_date:
+                return c
+
+        # Nearest within window
+        candidates = []
+        for c in history.candles:
+            c_dt = c.date if isinstance(c.date, datetime) else None
+            if c_dt:
+                diff = abs((c_dt.date() - target_date).days)
+                if diff <= _PRICE_LOOKUP_WINDOW_DAYS:
+                    candidates.append((diff, c))
+
+        if candidates:
+            candidates.sort(key=lambda x: x[0])
+            return candidates[0][1]
+        return None
+
+    def _check_price_match(
+        self, history: History, target_dt: datetime, target_price: Price
+    ) -> bool:
+        target_date = target_dt.date()
+        target_price_val = target_price.root
+
+        match_range = self._find_nearest_candle(history, target_date)
+
+        if not match_range:
             return False
+
+        logger.info(
+            "Matched range for %s on %s: Low=%s, High=%s, Close=%s",
+            history.symbol.ticker,
+            target_date,
+            match_range.low,
+            match_range.high,
+            match_range.close,
+        )
+
+        # Range Check
+        low = match_range.low
+        high = match_range.high
+        close = match_range.close
+
+        if low is not None and high is not None:
+            if low <= target_price_val <= high:
+                return True
+
+        # Close Check (5% tolerance)
+        if close is not None:
+            pct_diff = abs(close - target_price_val) / target_price_val
+            if pct_diff < 0.05:
+                return True
+
+        # If we reach here, it failed. Raise error with details.
+        raise PriceVerificationError(
+            f"Price {target_price_val} does not match {history.symbol.ticker}",
+            ticker=str(history.symbol.ticker),
+            actual_date=target_date,
+            expected_price=target_price_val,
+            actual_low=low,
+            actual_high=high,
+            actual_close=close,
+        )
