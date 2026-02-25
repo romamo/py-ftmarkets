@@ -965,7 +965,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-market-data", specifier = ">=0.1.11" },
+    { name = "pydantic-market-data", specifier = ">=0.1.15" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "requests", specifier = ">=2.32.5" },
 ]
@@ -1140,7 +1140,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-market-data"
-version = "0.1.14"
+version = "0.1.15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1150,9 +1150,9 @@ dependencies = [
     { name = "pydantic-extra-types" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/92/51/0f14c13bcb8729dafc4f8eab4a912daf8cb5674698d44591fe37db7bddac/pydantic_market_data-0.1.14.tar.gz", hash = "sha256:b772f12773f8f913788d5f338fb2b66233a232a16e8797dd2d68c000f5f5615e", size = 90632, upload-time = "2026-02-22T15:06:49.254Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7f/ee/2a49bd160d9c9d4af4c52a550a36934aef72aec3bd79fbcd2ab589bd011a/pydantic_market_data-0.1.15.tar.gz", hash = "sha256:700093e8729fa152dfcbfed6d35f80a578cfa732bcec7b8406fca3bd41126bbb", size = 90812, upload-time = "2026-02-25T10:22:48.445Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/44/6d/d6ecb32ff775f7a0a6fbb3ca6a44df3ce11909d619e057b0fdf0815f0cbe/pydantic_market_data-0.1.14-py3-none-any.whl", hash = "sha256:3c44589e48464852cefcd75ce148b832f6ec0fefd16e6641ca5d85d07791e4b2", size = 9064, upload-time = "2026-02-22T15:06:50.31Z" },
+    { url = "https://files.pythonhosted.org/packages/74/64/5164ef48a4ba441b81adf8c9dff264c3f0842cb07be01ce2f5015240d8c9/pydantic_market_data-0.1.15-py3-none-any.whl", hash = "sha256:b0e563a71bdc0ba3a54701fe37be8c9add5f3a59cb4e5d26596bacfa6434147f", size = 9251, upload-time = "2026-02-25T10:22:47.553Z" },
 ]
 
 [[package]]
