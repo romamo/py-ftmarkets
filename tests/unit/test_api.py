@@ -69,6 +69,10 @@ class TestFTDataSource(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.ds._ensure_datetime(12345)  # type: ignore
 
+    def test_ensure_datetime_none(self):
+        res = self.ds._ensure_datetime(None)
+        self.assertIsInstance(res, datetime)
+
     def test_validate(self):
         self.mock_scraper.get_history.return_value = History(
             symbol=Symbol(ticker="AAPL", name="Apple"),
@@ -77,6 +81,13 @@ class TestFTDataSource(unittest.TestCase):
         self.assertTrue(self.ds.validate("AAPL", datetime(2023, 1, 1), Price(root=150.0)))
         with self.assertRaises(PriceVerificationError):
             self.ds.validate("AAPL", datetime(2023, 1, 1), Price(root=200.0))
+
+    def test_validate_float_price(self):
+        self.mock_scraper.get_history.return_value = History(
+            symbol=Symbol(ticker="AAPL", name="Apple"),
+            candles=[OHLCV(date=datetime(2023, 1, 1), close=150.0)],
+        )
+        self.assertTrue(self.ds.validate("AAPL", datetime(2023, 1, 1), 150.0))
 
     def test_check_price_match_boundaries(self):
         history = History(
@@ -178,7 +189,7 @@ class TestFTDataSource(unittest.TestCase):
         cand = Symbol(ticker="AAPL", name="Apple")
         self.mock_scraper.get_history.return_value = History(symbol=cand, candles=[])
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(ValueError):
             self.ds.get_price(ticker, target_date)
 
     def test_history(self):

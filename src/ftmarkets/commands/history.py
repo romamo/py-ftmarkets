@@ -71,10 +71,5 @@ class HistoryCommand(HistoryArgs):
                     logger.error("VALIDATION FAILED")
                     sys.exit(1)
             except PriceVerificationError as e:
-                range_str = (
-                    f"{e.actual_low:.2f} - {e.actual_high:.2f}"
-                    if e.actual_low is not None and e.actual_high is not None
-                    else str(e)
-                )
-                logger.error("VALIDATION FAILED (Matched range: %s)", range_str)
+                logger.error(f"VALIDATION FAILED: {e}")
                 sys.exit(1)

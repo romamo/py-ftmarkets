@@ -80,22 +80,20 @@ class FTDataSource(DataSource):
             tp = criteria.target_price
             target_pr = Price(root=float(tp)) if isinstance(tp, (int, float)) else tp
 
-            valid_candidates = []
             for cand in filtered:
-                hist = self.scraper.get_history(cand.ticker, days=days)
                 try:
+                    hist = self.scraper.get_history(cand.ticker, days=days)
                     if self._check_price_match(hist, target_dt, target_pr):
-                        valid_candidates.append(cand)
-                except PriceVerificationError:
+                        return cand
+                except (PriceVerificationError, Exception) as e:
+                    logger.debug("Candidate %s failed validation: %s", cand.ticker, e)
                     continue
 
-            if valid_candidates:
-                return valid_candidates[0]
             return None
 
         return filtered[0]
 
-    def get_price(self, ticker: Ticker | str, date: date | None = None) -> Price:
+    def get_price(self, ticker: Ticker.Input, date: date | None = None) -> Price:
         """
         Get the price for a ticker (current or historical).
         """
@@ -110,11 +108,11 @@ class FTDataSource(DataSource):
         if match_range and match_range.close is not None:
             return Price(root=float(match_range.close))
 
-        raise RuntimeError(
+        raise ValueError(
             f"Could not retrieve price for ticker '{ticker_val.root}' on {target_date}"
         )
 
-    def history(self, ticker: Ticker | str, period: HistoryPeriod = HistoryPeriod.MO1) -> History:
+    def history(self, ticker: Ticker.Input, period: HistoryPeriod = HistoryPeriod.MO1) -> History:
         ticker_val = Ticker(root=ticker) if isinstance(ticker, str) else ticker
         # Convert period string to days
         days_map = {
@@ -133,9 +131,7 @@ class FTDataSource(DataSource):
         days = days_map.get(period, 30)
         return self.scraper.get_history(ticker_val, days=days)
 
-    def validate(
-        self, ticker: Ticker | str, target_date: date, target_price: Price | float
-    ) -> bool:
+    def validate(self, ticker: Ticker.Input, target_date: date, target_price: Price.Input) -> bool:
         """
         Validates if the ticker traded near the target price on the target date.
         """
@@ -164,7 +160,7 @@ class FTDataSource(DataSource):
         days_diff = (datetime.now() - target_date).days
         return max(days_diff + 5, 30)
 
-    def _find_nearest_candle(self, history: History, target_date):
+    def _find_nearest_candle(self, history: History, target_date: date) -> OHLCV | None:
         """Return the OHLCV candle closest to target_date within _PRICE_LOOKUP_WINDOW_DAYS."""
         # Exact match first
         for c in history.candles:
@@ -222,12 +218,18 @@ class FTDataSource(DataSource):
                 return True
 
         # If we reach here, it failed. Raise error with details.
+        msg = (
+            f"Price {target_price_val} is outside daily range"
+            if low is not None and high is not None
+            else f"Price {target_price_val} is not within 5% of close"
+        )
         raise PriceVerificationError(
-            f"Price {target_price_val} does not match {history.symbol.ticker}",
+            msg,
             ticker=str(history.symbol.ticker),
             actual_date=target_date,
             expected_price=target_price_val,
             actual_low=low,
             actual_high=high,
             actual_close=close,
+            source="Financial Times",
         )

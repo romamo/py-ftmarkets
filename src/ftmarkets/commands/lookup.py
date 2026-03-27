@@ -76,13 +76,7 @@ class LookupCommand(SearchArgs):
                         self._print_result(s)
                         validated_count += 1
                 except PriceVerificationError as e:
-                    # Clean up the Matched range format
-                    range_str = (
-                        f"{e.actual_low:.2f} - {e.actual_high:.2f}"
-                        if e.actual_low is not None and e.actual_high is not None
-                        else str(e)
-                    )
-                    logger.info(f"Validation failed for {s.ticker}, Matched range {range_str}")
+                    logger.info(f"Validation failed for {s.ticker}: {e}")
                 except ScraperError as e:
                     logger.debug(f"Scraper error during validation of {s.ticker}: {e}")
                 except requests.exceptions.HTTPError as e:

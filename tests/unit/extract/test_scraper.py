@@ -43,6 +43,22 @@ def test_get_xid_extraction(scraper, mock_client):
     mock_client.get.assert_called_with("/data/equities/tearsheet/summary?s=TEST:EX")
 
 
+def test_get_xid_json_error_fallback(scraper, mock_client):
+    html_content = """
+    <html>
+        <body>
+            <div data-mod-config='invalid_json_here'></div>
+            <div data-mod-config='{"not_xid":"123456"}'></div>
+            <script>var config = { xid: "987654" };</script>
+        </body>
+    </html>
+    """
+    mock_client.get.return_value = MagicMock(
+        status_code=200, content=html_content.encode(), text=html_content
+    )
+    assert scraper.get_xid(Ticker(root="TEST")).root == "987654"
+
+
 def test_get_xid_regex_fallback(scraper, mock_client):
     # Setup mock HTML with xid in script or other text
     html_content = """
@@ -163,6 +179,41 @@ def test_search_tearsheet_redirect(scraper, mock_client):
     assert len(results) == 1
     assert str(results[0].ticker) == "AAPL:NSQ"
     assert str(results[0].isin) == "US0378331005"
+    assert results[0].asset_class == "Equity"
+
+    # Test other asset class redirects
+    mock_client.get.return_value.url = (
+        "https://markets.ft.com/data/etfs/tearsheet/summary?s=AAPL:NSQ"
+    )
+    assert scraper.search("US0378331005")[0].asset_class == "ETF"
+
+    mock_client.get.return_value.url = (
+        "https://markets.ft.com/data/funds/tearsheet/summary?s=AAPL:NSQ"
+    )
+    assert scraper.search("US0378331005")[0].asset_class == "Fund"
+
+    mock_client.get.return_value.url = (
+        "https://markets.ft.com/data/indices/tearsheet/summary?s=AAPL:NSQ"
+    )
+    assert scraper.search("US0378331005")[0].asset_class == "Index"
+
+    # Test no symbol code
+    mock_client.get.return_value.url = "https://markets.ft.com/data/equities/tearsheet/summary"
+    assert len(scraper.search("US0378331005")) == 0
+
+    # Test missing ISIN
+    html_content_no_isin = """
+    <html>
+        <h1 class="mod-tearsheet-overview__header__name">Apple Inc</h1>
+        <table><tr><th>Some Other Th</th><td>123</td></tr></table>
+    </html>
+    """
+    mock_client.get.return_value = MagicMock(
+        status_code=200,
+        content=html_content_no_isin.encode(),
+        url="https://markets.ft.com/data/equities/tearsheet/summary?s=AAPL:NSQ",
+    )
+    assert len(scraper.search("AAPL")) == 1
 
 
 def test_get_xid_fails(scraper, mock_client):
@@ -239,3 +290,39 @@ def test_extract_currency_heuristics(scraper):
 def test_map_country_to_currency(scraper):
     assert str(scraper._map_country_to_currency("US")) == "USD"
     assert scraper._map_country_to_currency(None) is None
+
+
+def test_map_country_to_code(scraper):
+    assert scraper._map_country_to_code("United States") == "US"
+    assert scraper._map_country_to_code("Invalid Country xyz") is None
+    assert scraper._map_country_to_code(None) is None
+
+
+def test_http_400_errors(scraper, mock_client):
+    import requests
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 400
+    mock_resp.text = "Error 400"
+    mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError()
+
+    mock_client.get.return_value = mock_resp
+    with pytest.raises(requests.exceptions.HTTPError):
+        scraper.search("AAPL")
+
+    with pytest.raises(requests.exceptions.HTTPError):
+        scraper.get_xid(Ticker(root="AAPL"))
+
+    mock_client.post.return_value = mock_resp
+    with pytest.raises(requests.exceptions.HTTPError):
+        # We need a valid XID to bypass get_xid, so we patch get_xid
+        scraper.get_xid = MagicMock(return_value=Xid(root="123"))
+        scraper.get_history(Ticker(root="AAPL"), 10)
+
+
+def test_get_history_missing_elements(scraper, mock_client):
+    scraper.get_xid = MagicMock(return_value=Xid(root="123"))
+    chart_json = {"Dates": ["2023-01-01T00:00:00"], "Elements": []}
+    mock_client.post.return_value = MagicMock(status_code=200, json=lambda: chart_json)
+    hist = scraper.get_history(Ticker(root="AAPL"), 10)
+    assert len(hist.candles) == 0

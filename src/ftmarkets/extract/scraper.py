@@ -41,12 +41,12 @@ class Scraper:
     def __init__(self, http_client: FTClient | None = None):
         self.client = http_client or client
 
-    def search(self, query: str | Ticker) -> list[Symbol]:
+    def search(self, query: Ticker.Input) -> list[Symbol]:
         """
         Search for a security by ISIN, symbol, or name.
         Parsing logic is strict but resilient to HTML changes where possible.
         """
-        query_str = str(query)
+        query_str = str(query.root if hasattr(query, "root") else query)
         url = "/data/search"
         response = self.client.get(url, params={"query": query_str})
         try:
@@ -188,7 +188,7 @@ class Scraper:
 
         return [Symbol(ticker=symbol_code, name=name, isin=isin_val, asset_class=asset_class)]
 
-    def get_history(self, ticker: Ticker | str, days: int = 30) -> History:
+    def get_history(self, ticker: Ticker.Input, days: int = 30) -> History:
         """
         Fetch historical data using the strict Chart API schemas.
         """
@@ -332,31 +332,12 @@ class Scraper:
     def _map_country_to_code(self, country_name: str | None) -> str | None:
         if not country_name:
             return None
-        mapping = {
-            "United Kingdom": "GB",
-            "United States": "US",
-            "France": "FR",
-            "Germany": "DE",
-            "Canada": "CA",
-            "Italy": "IT",
-            "Spain": "ES",
-            "Netherlands": "NL",
-            "Australia": "AU",
-            "Japan": "JP",
-            "Switzerland": "CH",
-            "Sweden": "SE",
-            "Belgium": "BE",
-            "Ireland": "IE",
-            "Denmark": "DK",
-            "Finland": "FI",
-            "Norway": "NO",
-            "Portugal": "PT",
-            "Hong Kong": "HK",
-            "Singapore": "SG",
-            "China": "CN",
-            "India": "IN",
-        }
-        return mapping.get(country_name, None)
+        import pycountry
+
+        try:
+            return pycountry.countries.lookup(country_name).alpha_2
+        except LookupError:
+            return None
 
     def _extract_currency(self, ticker: str) -> Currency | None:
         parts = ticker.split(":")
