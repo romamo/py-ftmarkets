@@ -2,7 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.1] = 2026-02-09
+## [0.2.0] - 2026-04-03
+
+### Added
+- **Asset Class Filtering**: Added strict filtering for `STOCK`, `EQUITY`, `ETF`, `INDEX`, and `FUND` in `FTDataSource.search`.
+
+## [0.1.9] - 2026-03-01
+
+### Internal
+- Version bump in `pyproject.toml`.
+
+## [0.1.1] - 2026-02-09
 
 ### Fixed
 - Remove local dependency `pydantic-market-data` from `pyproject.toml` to fix PyPI installation.
