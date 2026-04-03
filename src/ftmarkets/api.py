@@ -53,6 +53,30 @@ class FTDataSource(DataSource):
         if not candidates:
             return None
 
+        # Asset Class Filtering (Strict)
+        if criteria.asset_class:
+            ac_raw = str(criteria.asset_class).upper()
+            target_ac = None
+            if "STOCK" in ac_raw or "EQUITY" in ac_raw:
+                target_ac = "EQUITY"
+            elif "ETF" in ac_raw:
+                target_ac = "ETF"
+            elif "INDEX" in ac_raw:
+                target_ac = "INDEX"
+            elif "FUND" in ac_raw:
+                target_ac = "FUND"
+            else:
+                # Unrecognizable class provided, must fail as requested.
+                return None
+            
+            candidates = [
+                c for c in candidates 
+                if c.asset_class and target_ac in c.asset_class.upper()
+            ]
+
+        if not candidates:
+            return None
+
         filtered = []
         for cand in candidates:
             # Currency Check
