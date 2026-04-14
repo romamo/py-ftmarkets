@@ -4,7 +4,7 @@ import sys
 
 import requests
 from pydantic_market_data.cli_models import SearchArgs
-from pydantic_market_data.models import Price, PriceVerificationError, StrictDate, Symbol
+from pydantic_market_data.models import Price, PriceVerificationError, Security, StrictDate
 
 from .. import api
 from ..extract.scraper import ScraperError
@@ -20,9 +20,9 @@ class LookupCommand(SearchArgs):
         ds = api.FTDataSource()
 
         # Priority: ISIN > Symbol > Description
-        query = self.isin or self.ticker or self.desc
+        query = self.isin or self.symbol or self.desc
         if not query:
-            logger.error("Please provide --isin, --ticker, or --desc")
+            logger.error("Please provide --isin, --symbol, or --desc")
             sys.exit(1)
 
         results = ds.search(query)
@@ -72,54 +72,54 @@ class LookupCommand(SearchArgs):
                 # Removed bare except Exception to enforce Fail Fast rule.
                 # Let it crash if not BaseScraperError.
                 try:
-                    if ds.validate(s.ticker, strict_date.value, target_price):
+                    if ds.validate(s.symbol, strict_date.value, target_price):
                         self._print_result(s)
                         validated_count += 1
                 except PriceVerificationError as e:
-                    logger.info(f"Validation failed for {s.ticker}: {e}")
+                    logger.info(f"Validation failed for {s.symbol}: {e}")
                 except ScraperError as e:
-                    logger.debug(f"Scraper error during validation of {s.ticker}: {e}")
+                    logger.debug(f"Scraper error during validation of {s.symbol}: {e}")
                 except requests.exceptions.HTTPError as e:
-                    logger.debug(f"HTTP error during validation of {s.ticker}: {e}")
+                    logger.debug(f"HTTP error during validation of {s.symbol}: {e}")
 
             if validated_count == 0:
-                logger.error("Ticker not found")
+                logger.error("Security not found")
                 sys.exit(1)
             return
 
         limit = self.limit if self.limit is not None else 100
-        symbols = filtered[:limit] if limit > 0 else filtered
+        securities = filtered[:limit] if limit > 0 else filtered
 
-        if not symbols:
-            logger.error("Ticker not found")
+        if not securities:
+            logger.error("Security not found")
             sys.exit(1)
 
         if self.format == "json":
-            data = [s.model_dump(mode="json") for s in symbols]
+            data = [s.model_dump(mode="json") for s in securities]
             print(json.dumps(data, indent=2))
         elif self.format == "xml":
             print("<Results>")
-            for s in symbols:
-                self._print_xml_symbol(s)
+            for s in securities:
+                self._print_xml_security(s)
             print("</Results>")
         else:
-            for s in symbols:
-                print(s.ticker)
+            for s in securities:
+                print(s.symbol)
 
-    def _print_result(self, s: Symbol) -> None:
+    def _print_result(self, s: Security) -> None:
         if self.format == "json":
             print(json.dumps(s.model_dump(mode="json"), indent=2))
         elif self.format == "xml":
-            self._print_xml_symbol(s)
+            self._print_xml_security(s)
         else:
-            print(s.ticker)
+            print(s.symbol)
 
-    def _print_xml_symbol(self, s: Symbol) -> None:
-        print("  <Symbol>")
-        print(f"    <Ticker>{s.ticker}</Ticker>")
+    def _print_xml_security(self, s: Security) -> None:
+        print("  <Security>")
+        print(f"    <Symbol>{s.symbol}</Symbol>")
         print(f"    <Name>{s.name}</Name>")
         print(f"    <Exchange>{s.exchange or ''}</Exchange>")
         print(f"    <Country>{s.country or ''}</Country>")
         print(f"    <Currency>{s.currency or ''}</Currency>")
         print(f"    <AssetClass>{s.asset_class or ''}</AssetClass>")
-        print("  </Symbol>")
+        print("  </Security>")

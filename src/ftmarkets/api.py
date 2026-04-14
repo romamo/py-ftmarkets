@@ -8,16 +8,16 @@ from pydantic_market_data.models import (
     HistoryPeriod,
     Price,
     PriceVerificationError,
+    Security,
     SecurityCriteria,
     StrictDate,
     Symbol,
-    Ticker,
 )
 
 from .extract.scraper import Scraper, scraper
 
 # Re-export needed models for CLI
-__all__ = ["FTDataSource", "History", "OHLCV", "SecurityCriteria", "Symbol"]
+__all__ = ["FTDataSource", "History", "OHLCV", "SecurityCriteria", "Security"]
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +33,16 @@ class FTDataSource(DataSource):
     def __init__(self, scraper_instance: Scraper | None = None):
         self.scraper = scraper_instance or scraper
 
-    def search(self, query: str) -> list[Symbol]:
+    def search(self, query: str) -> list[Security]:
         return self.scraper.search(query)
 
-    def resolve(self, criteria: SecurityCriteria) -> Symbol | None:
+    def resolve(self, criteria: SecurityCriteria) -> Security | None:
         """
         Resolve a security based on criteria.
         Checks for ISIN, Symbol, Description.
         Validates against Price/Date if provided.
         """
-        candidates: list[Symbol] = []
+        candidates: list[Security] = []
         if criteria.isin:
             candidates = self.scraper.search(str(criteria.isin))
         if not candidates and criteria.symbol:
@@ -85,7 +85,7 @@ class FTDataSource(DataSource):
                 if cand_curr != str(criteria.currency).upper():
                     logger.debug(
                         "Skipping candidate %s due to currency mismatch: %s != %s",
-                        cand.ticker,
+                        cand.symbol,
                         cand_curr,
                         criteria.currency,
                     )
@@ -106,25 +106,25 @@ class FTDataSource(DataSource):
 
             for cand in filtered:
                 try:
-                    hist = self.scraper.get_history(cand.ticker, days=days)
+                    hist = self.scraper.get_history(cand.symbol, days=days)
                     if self._check_price_match(hist, target_dt, target_pr):
                         return cand
                 except (PriceVerificationError, Exception) as e:
-                    logger.debug("Candidate %s failed validation: %s", cand.ticker, e)
+                    logger.debug("Candidate %s failed validation: %s", cand.symbol, e)
                     continue
 
             return None
 
         return filtered[0]
 
-    def get_price(self, ticker: Ticker.Input, date: date | None = None) -> Price:
+    def get_price(self, symbol: Symbol.Input, date: date | None = None) -> Price:
         """
-        Get the price for a ticker (current or historical).
+        Get the price for a symbol (current or historical).
         """
-        ticker_val = Ticker(root=ticker) if isinstance(ticker, str) else ticker
+        symbol_val = Symbol(root=symbol) if isinstance(symbol, str) else symbol
         target_dt = self._ensure_datetime(date)
         days = self._get_required_history_days(target_dt)
-        hist = self.scraper.get_history(ticker_val, days=days + 10)
+        hist = self.scraper.get_history(symbol_val, days=days + 10)
 
         target_date = target_dt.date()
         match_range = self._find_nearest_candle(hist, target_date)
@@ -133,11 +133,11 @@ class FTDataSource(DataSource):
             return Price(root=float(match_range.close))
 
         raise ValueError(
-            f"Could not retrieve price for ticker '{ticker_val.root}' on {target_date}"
+            f"Could not retrieve price for symbol '{symbol_val.root}' on {target_date}"
         )
 
-    def history(self, ticker: Ticker.Input, period: HistoryPeriod = HistoryPeriod.MO1) -> History:
-        ticker_val = Ticker(root=ticker) if isinstance(ticker, str) else ticker
+    def history(self, symbol: Symbol.Input, period: HistoryPeriod = HistoryPeriod.MO1) -> History:
+        symbol_val = Symbol(root=symbol) if isinstance(symbol, str) else symbol
         # Convert period string to days
         days_map = {
             HistoryPeriod.D1: 2,
@@ -153,13 +153,13 @@ class FTDataSource(DataSource):
         }
 
         days = days_map.get(period, 30)
-        return self.scraper.get_history(ticker_val, days=days)
+        return self.scraper.get_history(symbol_val, days=days)
 
-    def validate(self, ticker: Ticker.Input, target_date: date, target_price: Price.Input) -> bool:
+    def validate(self, symbol: Symbol.Input, target_date: date, target_price: Price.Input) -> bool:
         """
-        Validates if the ticker traded near the target price on the target date.
+        Validates if the symbol traded near the target price on the target date.
         """
-        ticker_val = Ticker(root=ticker) if isinstance(ticker, str) else ticker
+        symbol_val = Symbol(root=symbol) if isinstance(symbol, str) else symbol
         if isinstance(target_price, (int, float)):
             price_val = Price(root=float(target_price))
         else:
@@ -168,7 +168,7 @@ class FTDataSource(DataSource):
         target_dt = self._ensure_datetime(target_date)
         days = self._get_required_history_days(target_dt)
         # Fetch slightly more history to be safe
-        hist = self.scraper.get_history(ticker_val, days=days + 10)
+        hist = self.scraper.get_history(symbol_val, days=days + 10)
 
         return self._check_price_match(hist, target_dt, price_val)
 
@@ -219,7 +219,7 @@ class FTDataSource(DataSource):
 
         logger.info(
             "Matched range for %s on %s: Low=%s, High=%s, Close=%s",
-            history.symbol.ticker,
+            history.security.symbol,
             target_date,
             match_range.low,
             match_range.high,
@@ -249,7 +249,7 @@ class FTDataSource(DataSource):
         )
         raise PriceVerificationError(
             msg,
-            ticker=str(history.symbol.ticker),
+            symbol=str(history.security.symbol),
             actual_date=target_date,
             expected_price=target_price_val,
             actual_low=low,

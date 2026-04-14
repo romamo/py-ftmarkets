@@ -3,11 +3,11 @@ from pydantic import ValidationError
 from pydantic_extra_types.currency_code import Currency
 from pydantic_market_data.models import Price
 
-from ftmarkets.extract.schemas import Isin, Ticker
+from ftmarkets.extract.schemas import Isin, Symbol
 
 
-def test_ticker_valid():
-    t = Ticker(root="AAPL")
+def test_symbol_valid():
+    t = Symbol(root="AAPL")
     assert str(t) == "AAPL"
 
 

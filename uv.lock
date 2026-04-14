@@ -965,7 +965,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-market-data", specifier = ">=0.1.16" },
+    { name = "pydantic-market-data", specifier = "==0.2.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "requests", specifier = ">=2.32.5" },
 ]
@@ -1140,7 +1140,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-market-data"
-version = "0.1.16"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1150,9 +1150,9 @@ dependencies = [
     { name = "pydantic-extra-types" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/55/7537350dd85910e309d408686f56fad17dd1a43b3e074b2e0d1f4ad350f8/pydantic_market_data-0.1.16.tar.gz", hash = "sha256:8c769960c93f55df270a4f985169bb82001671f30ad0ced3332b9f040ac4ee2e", size = 91560, upload-time = "2026-03-27T18:07:01.618Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/bc/511a23b25268604b647b535cca32a5990ceb97d783e644af173feb714243/pydantic_market_data-0.2.0.tar.gz", hash = "sha256:c55c33a72e15dde4da4e777010d00e2351a59f0905924000ddf000e2952362f0", size = 14145, upload-time = "2026-04-14T13:17:25.623Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ad/a1/1c3f1896d3952580e3f9e841751161551b3e3534d4cd8868ed5260ed3238/pydantic_market_data-0.1.16-py3-none-any.whl", hash = "sha256:91b71033e1661da2c78069f79fa5e51d63a1346d950d0480fd1a176bcf754824", size = 9439, upload-time = "2026-03-27T18:07:02.506Z" },
+    { url = "https://files.pythonhosted.org/packages/71/aa/09c1ccc71e28aa6bf692ec10494f182f76c1bbce827a350470ffbd23c540/pydantic_market_data-0.2.0-py3-none-any.whl", hash = "sha256:4bfaf62e28f3cf8aeabd5fea367c08c7adc443a5e8364694bf4169f9509abca2", size = 9659, upload-time = "2026-04-14T13:17:24.524Z" },
 ]
 
 [[package]]

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-04-14
+
+### Changed
+- **Model Renaming**: Aligned with `pydantic-market-data` core models.
+    - `Ticker` renamed to `Symbol`.
+    - `Symbol` renamed to `Security`.
+- **API Alignment**: Updated `FTDataSource` methods to use new model names.
+
 ## [0.2.0] - 2026-04-03
 
 ### Added

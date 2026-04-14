@@ -7,8 +7,8 @@ from pydantic_market_data.models import (
     History,
     Price,
     PriceVerificationError,
+    Security,
     SecurityCriteria,
-    Symbol,
 )
 
 from ftmarkets.api import FTDataSource
@@ -21,29 +21,29 @@ class TestFTDataSource(unittest.TestCase):
         self.ds = FTDataSource(scraper_instance=self.mock_scraper)
 
     def test_search(self):
-        self.mock_scraper.search.return_value = [Symbol(ticker="AAPL", name="Apple")]
+        self.mock_scraper.search.return_value = [Security(symbol="AAPL", name="Apple")]
         results = self.ds.search("AAPL")
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].ticker.root, "AAPL")
+        self.assertEqual(results[0].symbol.root, "AAPL")
 
     def test_resolve_isin(self):
         criteria = SecurityCriteria(isin="US0378331005")
         self.mock_scraper.search.return_value = [
-            Symbol(ticker="AAPL", name="Apple", isin="US0378331005")
+            Security(symbol="AAPL", name="Apple", isin="US0378331005")
         ]
         res = self.ds.resolve(criteria)
         self.assertIsNotNone(res)
-        self.assertEqual(res.ticker.root, "AAPL")
+        self.assertEqual(res.symbol.root, "AAPL")
 
     def test_resolve_currency_filter(self):
         criteria = SecurityCriteria(symbol="AAPL", currency="USD")
         self.mock_scraper.search.return_value = [
-            Symbol(ticker="AAPL:EUR", name="Apple EUR", currency="EUR"),
-            Symbol(ticker="AAPL:USD", name="Apple USD", currency="USD"),
+            Security(symbol="AAPL:EUR", name="Apple EUR", currency="EUR"),
+            Security(symbol="AAPL:USD", name="Apple USD", currency="USD"),
         ]
         res = self.ds.resolve(criteria)
         self.assertIsNotNone(res)
-        self.assertEqual(res.ticker.root, "AAPL:USD")
+        self.assertEqual(res.symbol.root, "AAPL:USD")
 
     def test_resolve_price_validation(self):
         target_date = date(2023, 1, 1)
@@ -51,16 +51,16 @@ class TestFTDataSource(unittest.TestCase):
             symbol="AAPL", target_date=target_date, target_price=Price(root=150.0)
         )
 
-        cand = Symbol(ticker="AAPL", name="Apple")
+        cand = Security(symbol="AAPL", name="Apple")
         self.mock_scraper.search.return_value = [cand]
 
         # Mock history showing match
         candles = [OHLCV(date=datetime(2023, 1, 1), open=149.0, high=151.0, low=148.0, close=150.0)]
-        self.mock_scraper.get_history.return_value = History(symbol=cand, candles=candles)
+        self.mock_scraper.get_history.return_value = History(security=cand, candles=candles)
 
         res = self.ds.resolve(criteria)
         self.assertIsNotNone(res)
-        self.assertEqual(res.ticker.root, "AAPL")
+        self.assertEqual(res.symbol.root, "AAPL")
 
     def test_ensure_datetime_fail_fast(self):
         with self.assertRaises(TypeError):
@@ -75,7 +75,7 @@ class TestFTDataSource(unittest.TestCase):
 
     def test_validate(self):
         self.mock_scraper.get_history.return_value = History(
-            symbol=Symbol(ticker="AAPL", name="Apple"),
+            security=Security(symbol="AAPL", name="Apple"),
             candles=[OHLCV(date=datetime(2023, 1, 1), close=150.0)],
         )
         self.assertTrue(self.ds.validate("AAPL", datetime(2023, 1, 1), Price(root=150.0)))
@@ -84,14 +84,14 @@ class TestFTDataSource(unittest.TestCase):
 
     def test_validate_float_price(self):
         self.mock_scraper.get_history.return_value = History(
-            symbol=Symbol(ticker="AAPL", name="Apple"),
+            security=Security(symbol="AAPL", name="Apple"),
             candles=[OHLCV(date=datetime(2023, 1, 1), close=150.0)],
         )
         self.assertTrue(self.ds.validate("AAPL", datetime(2023, 1, 1), 150.0))
 
     def test_check_price_match_boundaries(self):
         history = History(
-            symbol=Symbol(ticker="AAPL", name="Apple"),
+            security=Security(symbol="AAPL", name="Apple"),
             candles=[
                 OHLCV(date=datetime(2023, 1, 1), open=140.0, high=155.0, low=145.0, close=150.0),
                 OHLCV(date=datetime(2023, 1, 5), open=100.0, high=110.0, low=90.0, close=100.0),
@@ -119,10 +119,10 @@ class TestFTDataSource(unittest.TestCase):
 
     def test_resolve_description(self):
         criteria = SecurityCriteria(description="Apple Inc")
-        self.mock_scraper.search.return_value = [Symbol(ticker="AAPL", name="Apple")]
+        self.mock_scraper.search.return_value = [Security(symbol="AAPL", name="Apple")]
         res = self.ds.resolve(criteria)
         self.assertIsNotNone(res)
-        self.assertEqual(res.ticker.root, "AAPL")
+        self.assertEqual(res.symbol.root, "AAPL")
         self.mock_scraper.search.assert_called_with("Apple Inc")
 
     def test_resolve_no_candidates(self):
@@ -135,7 +135,7 @@ class TestFTDataSource(unittest.TestCase):
         # Currency mismatch
         criteria = SecurityCriteria(symbol="AAPL", currency="USD")
         self.mock_scraper.search.return_value = [
-            Symbol(ticker="AAPL:EUR", name="Apple EUR", currency="EUR")
+            Security(symbol="AAPL:EUR", name="Apple EUR", currency="EUR")
         ]
         res = self.ds.resolve(criteria)
         self.assertIsNone(res)
@@ -143,11 +143,11 @@ class TestFTDataSource(unittest.TestCase):
     def test_resolve_price_validation_fail(self):
         target_date = date(2023, 1, 1)
         criteria = SecurityCriteria(symbol="AAPL", target_date=target_date, target_price=150.0)
-        cand = Symbol(ticker="AAPL", name="Apple")
+        cand = Security(symbol="AAPL", name="Apple")
         self.mock_scraper.search.return_value = [cand]
         # Mock history showing mismatch
         candles = [OHLCV(date=datetime(2023, 1, 1), close=200.0)]
-        self.mock_scraper.get_history.return_value = History(symbol=cand, candles=candles)
+        self.mock_scraper.get_history.return_value = History(security=cand, candles=candles)
 
         res = self.ds.resolve(criteria)
         self.assertIsNone(res)
@@ -155,9 +155,9 @@ class TestFTDataSource(unittest.TestCase):
     def test_get_price_exact(self):
         ticker = "AAPL"
         target_date = date(2023, 1, 1)
-        cand = Symbol(ticker="AAPL", name="Apple")
+        cand = Security(symbol="AAPL", name="Apple")
         candles = [OHLCV(date=datetime(2023, 1, 1), close=150.0)]
-        self.mock_scraper.get_history.return_value = History(symbol=cand, candles=candles)
+        self.mock_scraper.get_history.return_value = History(security=cand, candles=candles)
 
         price = self.ds.get_price(ticker, target_date)
         self.assertEqual(price, Price(root=150.0))
@@ -165,13 +165,13 @@ class TestFTDataSource(unittest.TestCase):
     def test_get_price_nearest(self):
         ticker = "AAPL"
         target_date = date(2023, 1, 3)  # Jan 3
-        cand = Symbol(ticker="AAPL", name="Apple")
+        cand = Security(symbol="AAPL", name="Apple")
         # Jan 1 and Jan 5 available
         candles = [
             OHLCV(date=datetime(2023, 1, 1), close=140.0),
             OHLCV(date=datetime(2023, 1, 5), close=160.0),
         ]
-        self.mock_scraper.get_history.return_value = History(symbol=cand, candles=candles)
+        self.mock_scraper.get_history.return_value = History(security=cand, candles=candles)
 
         # Should match Jan 1 (diff 2) over Jan 5 (diff 2) if same diff,
         # but let's make one closer
@@ -179,26 +179,26 @@ class TestFTDataSource(unittest.TestCase):
             OHLCV(date=datetime(2023, 1, 1), close=140.0),  # diff 2
             OHLCV(date=datetime(2023, 1, 2), close=145.0),  # diff 1
         ]
-        self.mock_scraper.get_history.return_value = History(symbol=cand, candles=candles)
+        self.mock_scraper.get_history.return_value = History(security=cand, candles=candles)
         price = self.ds.get_price(ticker, target_date)
         self.assertEqual(price, Price(root=145.0))
 
     def test_get_price_failure(self):
         ticker = "AAPL"
         target_date = date(2023, 1, 1)
-        cand = Symbol(ticker="AAPL", name="Apple")
-        self.mock_scraper.get_history.return_value = History(symbol=cand, candles=[])
+        cand = Security(symbol="AAPL", name="Apple")
+        self.mock_scraper.get_history.return_value = History(security=cand, candles=[])
 
         with self.assertRaises(ValueError):
             self.ds.get_price(ticker, target_date)
 
     def test_history(self):
         ticker = "AAPL"
-        cand = Symbol(ticker="AAPL", name="Apple")
-        self.mock_scraper.get_history.return_value = History(symbol=cand, candles=[])
+        cand = Security(symbol="AAPL", name="Apple")
+        self.mock_scraper.get_history.return_value = History(security=cand, candles=[])
 
         from pydantic_market_data.models import HistoryPeriod
 
         res = self.ds.history(ticker, HistoryPeriod.D5)
         self.mock_scraper.get_history.assert_called()
-        self.assertEqual(res.symbol.ticker.root, "AAPL")
+        self.assertEqual(res.security.symbol.root, "AAPL")

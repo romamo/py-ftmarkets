@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field, RootModel
-from pydantic_market_data.models import Ticker as Ticker
+from pydantic_market_data.models import Symbol as Symbol
 
 
 class Xid(RootModel):
@@ -12,7 +12,7 @@ class Xid(RootModel):
         return self.root
 
 
-# Ticker is imported from pydantic_market_data.models
+# Symbol is imported from pydantic_market_data.models
 
 
 class Isin(RootModel):

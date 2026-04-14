@@ -4,7 +4,7 @@ from pydantic_market_data.models import History, HistoryPeriod, SecurityCriteria
 from pydantic_market_data.models import Price as PMDPrice
 
 from ftmarkets import api
-from ftmarkets.extract.schemas import Ticker
+from ftmarkets.extract.schemas import Symbol
 
 
 def test_search():
@@ -14,19 +14,19 @@ def test_search():
     assert any("Apple" in r.name for r in results)
 
 
-def test_resolve_ticker():
+def test_resolve_symbol():
     # Test resolution by symbol
     ds = api.FTDataSource()
-    sym = ds.resolve(SecurityCriteria(symbol="AAPL"))
-    assert sym is not None
-    assert str(sym.ticker) == "AAPL:NSQ"
+    sec = ds.resolve(SecurityCriteria(symbol="AAPL"))
+    assert sec is not None
+    assert str(sec.symbol) == "AAPL:NSQ"
 
 
 def test_history():
     # Test fetching history
     ds = api.FTDataSource()
-    ticker = Ticker(root="AAPL:NSQ")
-    hist = ds.history(ticker, period=HistoryPeriod.MO1)
+    symbol = Symbol(root="AAPL:NSQ")
+    hist = ds.history(symbol, period=HistoryPeriod.MO1)
     assert isinstance(hist, History)
     assert len(hist.candles) > 0
 
@@ -45,9 +45,9 @@ def test_datasource_interface():
     results = ds.search("AAPL")
     assert len(results) > 0
 
-    sym = ds.resolve(SecurityCriteria(symbol="AAPL"))
-    assert sym is not None
-    assert str(sym.ticker) == "AAPL:NSQ"
+    sec = ds.resolve(SecurityCriteria(symbol="AAPL"))
+    assert sec is not None
+    assert str(sec.symbol) == "AAPL:NSQ"
 
 
 def test_resolve_with_price_validation():
@@ -61,9 +61,9 @@ def test_resolve_with_price_validation():
         target_date=date(2024, 1, 2),
         currency="EUR",
     )
-    sym = ds.resolve(criteria)
-    assert sym is not None
-    assert "4GLD" in str(sym.ticker)
+    sec = ds.resolve(criteria)
+    assert sec is not None
+    assert "4GLD" in str(sec.symbol)
 
 
 def test_validate_older_date():
@@ -74,7 +74,7 @@ def test_validate_older_date():
     # Price on 2025-10-16 was around 68.50
     target_date = date(2025, 10, 16)
     target_price = PMDPrice(root=68.50)
-    ticker = Ticker(root="CHIP:PAR:EUR")
+    symbol = Symbol(root="CHIP:PAR:EUR")
 
-    is_valid = ds.validate(ticker, target_date, target_price)
+    is_valid = ds.validate(symbol, target_date, target_price)
     assert is_valid is True

@@ -14,15 +14,15 @@ pip install py-ftmarkets
 
 The package provides a CLI tool named `ftmarkets`.
 
-### Lookup a Ticker
+### Lookup a Security
 
-Resolve an ISIN or Symbol to the Financial Times ticker format (e.g., `AAPL:NSQ`).
+Resolve an ISIN or Symbol to the Financial Times symbol format (e.g., `AAPL:NSQ`).
 
 ```bash
 # Basic lookup by ISIN
 ftmarkets lookup --isin DE000A0S9GB0
 
-# Lookup with price and date validation (Returns 1 best matching ticker)
+# Lookup with price and date validation (Returns 1 best matching security)
 ftmarkets lookup --isin DE000A0S9GB0 --price 117.81 --date 2025-12-12 --limit 1
 
 # Lookup with filters (currency, country, asset-class)
@@ -34,7 +34,7 @@ ftmarkets lookup --isin DE000A0S9GB0 --limit 0 --format json
 
 ### Fetch History and Validate
 
-Fetch historical data for a resolved ticker and optionally validate a trade price on a specific date.
+Fetch historical data for a resolved security and optionally validate a trade price on a specific date.
 
 ```bash
 # Fetch 1 month of history for an ISIN
@@ -56,16 +56,16 @@ source = FTDataSource()
 
 # Resolve a security
 criteria = SecurityCriteria(isin="DE000A0S9GB0")
-symbol = source.resolve(criteria)
-print(f"Ticker: {symbol.ticker}")
+security = source.resolve(criteria)
+print(f"Symbol: {security.symbol}")
 
 # Fetch history
-history = source.history(symbol.ticker, period="1mo")
+history = source.history(security.symbol, period="1mo")
 df = history.to_pandas()
 print(df.tail())
 
 # Validate price
-is_valid = source.validate(symbol.ticker, target_date="2025-01-15", target_price=120.50)
+is_valid = source.validate(security.symbol, target_date="2025-01-15", target_price=120.50)
 print(f"Price valid: {is_valid}")
 ```
 

@@ -1,10 +1,10 @@
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic_market_data.models import Symbol
+from pydantic_market_data.models import Security
 
 from ftmarkets.client import FTClient
-from ftmarkets.extract.schemas import Ticker
+from ftmarkets.extract.schemas import Symbol
 from ftmarkets.extract.scraper import Scraper, Xid
 
 
@@ -35,7 +35,7 @@ def test_get_xid_extraction(scraper, mock_client):
         status_code=200, content=html_content.encode(), text=html_content
     )
 
-    xid = scraper.get_xid(Ticker(root="TEST:EX"))
+    xid = scraper.get_xid(Symbol(root="TEST:EX"))
 
     assert isinstance(xid, Xid)
     assert xid.root == "123456"
@@ -56,7 +56,7 @@ def test_get_xid_json_error_fallback(scraper, mock_client):
     mock_client.get.return_value = MagicMock(
         status_code=200, content=html_content.encode(), text=html_content
     )
-    assert scraper.get_xid(Ticker(root="TEST")).root == "987654"
+    assert scraper.get_xid(Symbol(root="TEST")).root == "987654"
 
 
 def test_get_xid_regex_fallback(scraper, mock_client):
@@ -72,7 +72,7 @@ def test_get_xid_regex_fallback(scraper, mock_client):
         status_code=200, content=html_content.encode(), text=html_content
     )
 
-    xid = scraper.get_xid(Ticker(root="TEST:REGEX"))
+    xid = scraper.get_xid(Symbol(root="TEST:REGEX"))
 
     assert xid.root == "987654"
 
@@ -100,12 +100,12 @@ def test_search_parsing(scraper, mock_client):
     results = scraper.search("AAPL")
 
     assert len(results) == 1
-    sym = results[0]
-    assert isinstance(sym, Symbol)
-    assert str(sym.ticker) == "AAPL:NSQ"
-    assert sym.name == "Apple Inc"
-    assert str(sym.country) == "US"
-    assert sym.asset_class == "Equity"
+    sec = results[0]
+    assert isinstance(sec, Security)
+    assert str(sec.symbol) == "AAPL:NSQ"
+    assert sec.name == "Apple Inc"
+    assert str(sec.country) == "US"
+    assert sec.asset_class == "Equity"
 
 
 def test_get_history(scraper, mock_client):
@@ -146,7 +146,7 @@ def test_get_history(scraper, mock_client):
         status_code=200, content=xid_html.encode(), text=xid_html
     )
 
-    hist = scraper.get_history(Ticker(root="AAPL:NSQ"), days=10)
+    hist = scraper.get_history(Symbol(root="AAPL:NSQ"), days=10)
 
     assert len(hist.candles) == 1
     candle = hist.candles[0]
@@ -177,7 +177,7 @@ def test_search_tearsheet_redirect(scraper, mock_client):
     results = scraper.search("US0378331005")
 
     assert len(results) == 1
-    assert str(results[0].ticker) == "AAPL:NSQ"
+    assert str(results[0].symbol) == "AAPL:NSQ"
     assert str(results[0].isin) == "US0378331005"
     assert results[0].asset_class == "Equity"
 
@@ -224,7 +224,7 @@ def test_get_xid_fails(scraper, mock_client):
     )
 
     with pytest.raises(ScraperError, match="Could not determine internal FT ID"):
-        scraper.get_xid(Ticker(root="UNKNOWN"))
+        scraper.get_xid(Symbol(root="UNKNOWN"))
 
 
 def test_extract_currency_strict(scraper):
@@ -267,13 +267,13 @@ def test_search_parsing_funds_and_etfs(scraper, mock_client):
     results = scraper.search("TEST")
 
     assert len(results) == 4
-    assert str(results[0].ticker) == "FUND:EX"
+    assert str(results[0].symbol) == "FUND:EX"
     assert results[0].asset_class == "Fund"
-    assert str(results[1].ticker) == "IDX:EX"
+    assert str(results[1].symbol) == "IDX:EX"
     assert results[1].asset_class == "Index"
-    assert str(results[2].ticker) == "TEAR:SHEET"
+    assert str(results[2].symbol) == "TEAR:SHEET"
     assert results[2].name == "Tear Sheet Link"
-    assert str(results[3].ticker) == "FUND2:EX"
+    assert str(results[3].symbol) == "FUND2:EX"
     assert results[3].asset_class == "Fund"
 
 
@@ -311,18 +311,18 @@ def test_http_400_errors(scraper, mock_client):
         scraper.search("AAPL")
 
     with pytest.raises(requests.exceptions.HTTPError):
-        scraper.get_xid(Ticker(root="AAPL"))
+        scraper.get_xid(Symbol(root="AAPL"))
 
     mock_client.post.return_value = mock_resp
     with pytest.raises(requests.exceptions.HTTPError):
         # We need a valid XID to bypass get_xid, so we patch get_xid
         scraper.get_xid = MagicMock(return_value=Xid(root="123"))
-        scraper.get_history(Ticker(root="AAPL"), 10)
+        scraper.get_history(Symbol(root="AAPL"), 10)
 
 
 def test_get_history_missing_elements(scraper, mock_client):
     scraper.get_xid = MagicMock(return_value=Xid(root="123"))
     chart_json = {"Dates": ["2023-01-01T00:00:00"], "Elements": []}
     mock_client.post.return_value = MagicMock(status_code=200, json=lambda: chart_json)
-    hist = scraper.get_history(Ticker(root="AAPL"), 10)
+    hist = scraper.get_history(Symbol(root="AAPL"), 10)
     assert len(hist.candles) == 0

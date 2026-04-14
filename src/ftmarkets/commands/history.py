@@ -23,7 +23,7 @@ class HistoryCommand(HistoryArgs):
         # Use SecurityCriteria to resolve
         criteria = api.SecurityCriteria(
             isin=self.isin,
-            symbol=self.ticker,
+            symbol=self.symbol,
             description=self.desc,
             target_price=target_price_vo,
             target_date=target_date_vo.root if target_date_vo else None,
@@ -32,11 +32,11 @@ class HistoryCommand(HistoryArgs):
         sym = ds.resolve(criteria)
 
         if not sym:
-            logger.error("Could not resolve ticker.")
+            logger.error("Could not resolve symbol.")
             sys.exit(1)
 
-        ticker = sym.ticker
-        print(f"Resolved to: {ticker}")
+        symbol = sym.symbol
+        print(f"Resolved to: {symbol}")
 
         # safely parse HistoryPeriod
         try:
@@ -46,7 +46,7 @@ class HistoryCommand(HistoryArgs):
             logger.error(f"Invalid period '{self.period}'. Valid: {valid_periods}")
             sys.exit(1)
 
-        hist = ds.history(ticker, period=enum_period)
+        hist = ds.history(symbol, period=enum_period)
         df = hist.to_pandas()
 
         if df.empty:
@@ -65,7 +65,7 @@ class HistoryCommand(HistoryArgs):
                 sys.exit(1)
 
             try:
-                if ds.validate(ticker, target_dt, Price(root=self.price)):
+                if ds.validate(symbol, target_dt, Price(root=self.price)):
                     print("VALIDATION PASSED")
                 else:
                     logger.error("VALIDATION FAILED")

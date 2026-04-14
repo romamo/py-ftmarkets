@@ -10,7 +10,7 @@ from lxml import html
 from lxml.html import HtmlElement
 from pydantic_extra_types.country import CountryAlpha2
 from pydantic_extra_types.currency_code import Currency
-from pydantic_market_data.models import OHLCV, History, Symbol
+from pydantic_market_data.models import OHLCV, History, Security
 
 from ..client import FTClient, client
 from .schemas import (
@@ -21,7 +21,7 @@ from .schemas import (
     ComponentSeries,
     DataPeriod,
     Isin,
-    Ticker,
+    Symbol,
     Xid,
 )
 
@@ -41,7 +41,7 @@ class Scraper:
     def __init__(self, http_client: FTClient | None = None):
         self.client = http_client or client
 
-    def search(self, query: Ticker.Input) -> list[Symbol]:
+    def search(self, query: Symbol.Input) -> list[Security]:
         """
         Search for a security by ISIN, symbol, or name.
         Parsing logic is strict but resilient to HTML changes where possible.
@@ -65,8 +65,8 @@ class Scraper:
         # Standard search results page
         return self._parse_search_results(tree, query_str)
 
-    def _parse_search_results(self, tree: HtmlElement, query: str) -> list[Symbol]:
-        results: list[Symbol] = []
+    def _parse_search_results(self, tree: HtmlElement, query: str) -> list[Security]:
+        results: list[Security] = []
         # Mapping for FT tab IDs/names to standard types
         asset_class_map = {
             "etf-panel": "ETF",
@@ -104,36 +104,36 @@ class Scraper:
                 cols = row.xpath("./td")
                 if len(cols) >= 2:
                     name = cols[0].text_content().strip()
-                    ticker_str = cols[1].text_content().strip()
+                    symbol_str = cols[1].text_content().strip()
                     exchange = cols[2].text_content().strip() if len(cols) > 2 else None
                     country = cols[3].text_content().strip() if len(cols) > 3 else None
                     self._add_to_results(
-                        results, ticker_str, name, exchange, country, asset_type, query
+                        results, symbol_str, name, exchange, country, asset_type, query
                     )
 
         # 2. Capture ALL tearsheet links on the page (covers "Best Match" and other lists)
-        # Avoid duplicates and ensure they look like tickers
+        # Avoid duplicates and ensure they look like symbols
         all_links = tree.xpath('//a[contains(@href, "tearsheet/summary?s=")]')
         for link in all_links:
             href = link.get("href")
             parsed = urlparse(href)
             qs = parse_qs(parsed.query)
-            ticker_str = qs.get("s", [None])[0]
+            symbol_str = qs.get("s", [None])[0]
             name = link.text_content().strip()
-            if ticker_str and not any(str(r.ticker) == ticker_str for r in results):
+            if symbol_str and not any(str(r.symbol) == symbol_str for r in results):
                 link_asset_type = None
                 for at_key in ["equities", "etfs", "funds", "indices"]:
                     if f"/{at_key}/" in href:
                         link_asset_type = asset_class_map.get(at_key, at_key.capitalize())
                         break
-                self._add_to_results(results, ticker_str, name, None, None, link_asset_type, query)
+                self._add_to_results(results, symbol_str, name, None, None, link_asset_type, query)
 
         return results
 
     def _add_to_results(
         self,
-        results: list[Symbol],
-        ticker: str,
+        results: list[Security],
+        symbol: str,
         name: str,
         exchange: str | None,
         country: str | None,
@@ -141,12 +141,12 @@ class Scraper:
         query: str,
     ) -> None:
         country_code = self._map_country_to_code(country)
-        currency = self._extract_currency(ticker) or self._map_country_to_currency(country_code)
+        currency = self._extract_currency(symbol) or self._map_country_to_currency(country_code)
         isin_val = query if self._is_isin(query) else None
 
-        # pass raw strings to Symbol model
-        sym = Symbol(
-            ticker=ticker,
+        # pass raw strings to Security model
+        sec = Security(
+            symbol=symbol,
             name=name,
             exchange=exchange,
             country=cast(CountryAlpha2 | None, country_code),
@@ -154,11 +154,11 @@ class Scraper:
             asset_class=asset_type,
             isin=str(isin_val) if isin_val else None,
         )
-        results.append(sym)
+        results.append(sec)
 
     def _parse_tearsheet_as_search_result(
         self, url: str, tree: HtmlElement, query: str
-    ) -> list[Symbol]:
+    ) -> list[Security]:
         """
         Parses a single tearsheet page as a search result (happens on exact match redirect).
         """
@@ -186,14 +186,14 @@ class Scraper:
         elif "/indices/" in url:
             asset_class = "Index"
 
-        return [Symbol(ticker=symbol_code, name=name, isin=isin_val, asset_class=asset_class)]
+        return [Security(symbol=symbol_code, name=name, isin=isin_val, asset_class=asset_class)]
 
-    def get_history(self, ticker: Ticker.Input, days: int = 30) -> History:
+    def get_history(self, symbol: Symbol.Input, days: int = 30) -> History:
         """
         Fetch historical data using the strict Chart API schemas.
         """
-        ticker_val = Ticker(root=ticker) if isinstance(ticker, str) else ticker
-        xid = self.get_xid(ticker_val)
+        symbol_val = Symbol(root=symbol) if isinstance(symbol, str) else symbol
+        xid = self.get_xid(symbol_val)
 
         # Clean xid (remove quotes if present)
         # xid is a strictly typed Xid, convert to string for manipulation if needed,
@@ -224,13 +224,13 @@ class Scraper:
         # Parse with Pydantic
         chart_data = ChartResponse(**resp.json())
 
-        return self._convert_to_history(ticker_val, chart_data)
+        return self._convert_to_history(symbol_val, chart_data)
 
-    def get_xid(self, ticker: Ticker) -> Xid:
+    def get_xid(self, symbol: Symbol) -> Xid:
         """
         Extract internal XID for a ticker.
         """
-        url_summary = f"/data/equities/tearsheet/summary?s={ticker.root}"
+        url_summary = f"/data/equities/tearsheet/summary?s={symbol.root}"
         # Note: Valid for Equities/ETFs/Indices usually, if not we might need adaptive URLs
         # But commonly ?s=TICKER works for lookup or redirects
         resp = self.client.get(url_summary)
@@ -270,11 +270,11 @@ class Scraper:
                 xid_str = match.group(1)
 
         if not xid_str:
-            raise ScraperError(f"Could not determine internal FT ID for ticker {ticker.root}")
+            raise ScraperError(f"Could not determine internal FT ID for ticker {symbol.root}")
 
         return Xid(root=xid_str)
 
-    def _convert_to_history(self, ticker: Ticker, data: ChartResponse) -> History:
+    def _convert_to_history(self, symbol: Symbol, data: ChartResponse) -> History:
         """
         Convert strictly typed API response to pydantic-market-data History.
         """
@@ -285,7 +285,7 @@ class Scraper:
         vol_el = next((e for e in data.elements if e.type == ChartElementType.VOLUME), None)
 
         if not price_el:
-            return History(symbol=Symbol(ticker=ticker, name=ticker.root), candles=[])
+            return History(security=Security(symbol=symbol, name=symbol.root), candles=[])
 
         # Extract series
         # Helper to get values list safely
@@ -319,7 +319,7 @@ class Scraper:
                 )
             )
 
-        return History(symbol=Symbol(ticker=ticker, name=ticker.root), candles=ranges)
+        return History(security=Security(symbol=symbol, name=symbol.root), candles=ranges)
 
     # --- Helpers ---
 
