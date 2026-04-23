@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-04-23
+
+### Changed
+- **Dependency**: Bumped `pydantic-market-data` to `>=0.3.0`.
+- **Breaking**: `SecurityCriteria` renamed to `SecurityQuery` to align with `pydantic-market-data` 0.3.0.
+- **Breaking**: `target_price` and `target_date` fields consolidated into `price_on: PriceOnDate` on `SecurityQuery`.
+
+### Added
+- **FIGI support**: `FTDataSource.resolve()` now searches by FIGI first (most specific) before falling back to ISIN → symbol → description.
+
 ## [0.3.0] - 2026-04-14
 
 ### Changed

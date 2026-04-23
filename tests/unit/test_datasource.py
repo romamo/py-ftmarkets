@@ -6,9 +6,10 @@ from pydantic_market_data.models import (
     OHLCV,
     History,
     Price,
+    PriceOnDate,
     PriceVerificationError,
     Security,
-    SecurityCriteria,
+    SecurityQuery,
     Symbol,
 )
 
@@ -31,7 +32,7 @@ def test_resolve_basic(datasource, mock_scraper):
         Security(symbol="AAPL:NSQ", name="Apple Inc", currency="USD")
     ]
 
-    criteria = SecurityCriteria(symbol="AAPL")
+    criteria = SecurityQuery(symbol="AAPL")
     result = datasource.resolve(criteria)
 
     assert result is not None
@@ -46,7 +47,7 @@ def test_resolve_currency_filter(datasource, mock_scraper):
     ]
 
     # Filter for USD
-    criteria = SecurityCriteria(symbol="TEST", currency="USD")
+    criteria = SecurityQuery(symbol="TEST", currency="USD")
     result = datasource.resolve(criteria)
 
     assert result is not None
@@ -67,9 +68,7 @@ def test_resolve_price_validation(datasource, mock_scraper):
         ],
     )
 
-    criteria = SecurityCriteria(
-        symbol="VALID", target_price=Price(root=100.0), target_date=target_date
-    )
+    criteria = SecurityQuery(symbol="VALID", price_on=PriceOnDate(price=100.0, date=target_date))
 
     result = datasource.resolve(criteria)
     assert result is not None

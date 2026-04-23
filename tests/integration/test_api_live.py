@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic_market_data.models import History, HistoryPeriod, SecurityCriteria
+from pydantic_market_data.models import History, HistoryPeriod, PriceOnDate, SecurityQuery
 from pydantic_market_data.models import Price as PMDPrice
 
 from ftmarkets import api
@@ -17,7 +17,7 @@ def test_search():
 def test_resolve_symbol():
     # Test resolution by symbol
     ds = api.FTDataSource()
-    sec = ds.resolve(SecurityCriteria(symbol="AAPL"))
+    sec = ds.resolve(SecurityQuery(symbol="AAPL"))
     assert sec is not None
     assert str(sec.symbol) == "AAPL:NSQ"
 
@@ -45,7 +45,7 @@ def test_datasource_interface():
     results = ds.search("AAPL")
     assert len(results) > 0
 
-    sec = ds.resolve(SecurityCriteria(symbol="AAPL"))
+    sec = ds.resolve(SecurityQuery(symbol="AAPL"))
     assert sec is not None
     assert str(sec.symbol) == "AAPL:NSQ"
 
@@ -55,10 +55,9 @@ def test_resolve_with_price_validation():
     # Price on 2024-01-02 was around 60.50.
     # Must use date object or strictly parsed string.
     ds = api.FTDataSource()
-    criteria = SecurityCriteria(
+    criteria = SecurityQuery(
         isin="DE000A0S9GB0",
-        target_price=PMDPrice(root=60.50),
-        target_date=date(2024, 1, 2),
+        price_on=PriceOnDate(price=60.50, date=date(2024, 1, 2)),
         currency="EUR",
     )
     sec = ds.resolve(criteria)

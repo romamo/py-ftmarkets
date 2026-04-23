@@ -6,9 +6,10 @@ from pydantic_market_data.models import (
     OHLCV,
     History,
     Price,
+    PriceOnDate,
     PriceVerificationError,
     Security,
-    SecurityCriteria,
+    SecurityQuery,
 )
 
 from ftmarkets.api import FTDataSource
@@ -27,7 +28,7 @@ class TestFTDataSource(unittest.TestCase):
         self.assertEqual(results[0].symbol.root, "AAPL")
 
     def test_resolve_isin(self):
-        criteria = SecurityCriteria(isin="US0378331005")
+        criteria = SecurityQuery(isin="US0378331005")
         self.mock_scraper.search.return_value = [
             Security(symbol="AAPL", name="Apple", isin="US0378331005")
         ]
@@ -36,7 +37,7 @@ class TestFTDataSource(unittest.TestCase):
         self.assertEqual(res.symbol.root, "AAPL")
 
     def test_resolve_currency_filter(self):
-        criteria = SecurityCriteria(symbol="AAPL", currency="USD")
+        criteria = SecurityQuery(symbol="AAPL", currency="USD")
         self.mock_scraper.search.return_value = [
             Security(symbol="AAPL:EUR", name="Apple EUR", currency="EUR"),
             Security(symbol="AAPL:USD", name="Apple USD", currency="USD"),
@@ -47,9 +48,7 @@ class TestFTDataSource(unittest.TestCase):
 
     def test_resolve_price_validation(self):
         target_date = date(2023, 1, 1)
-        criteria = SecurityCriteria(
-            symbol="AAPL", target_date=target_date, target_price=Price(root=150.0)
-        )
+        criteria = SecurityQuery(symbol="AAPL", price_on=PriceOnDate(price=150.0, date=target_date))
 
         cand = Security(symbol="AAPL", name="Apple")
         self.mock_scraper.search.return_value = [cand]
@@ -118,7 +117,7 @@ class TestFTDataSource(unittest.TestCase):
         )
 
     def test_resolve_description(self):
-        criteria = SecurityCriteria(description="Apple Inc")
+        criteria = SecurityQuery(description="Apple Inc")
         self.mock_scraper.search.return_value = [Security(symbol="AAPL", name="Apple")]
         res = self.ds.resolve(criteria)
         self.assertIsNotNone(res)
@@ -127,13 +126,13 @@ class TestFTDataSource(unittest.TestCase):
 
     def test_resolve_no_candidates(self):
         self.mock_scraper.search.return_value = []
-        criteria = SecurityCriteria(symbol="UNKNOWN")
+        criteria = SecurityQuery(symbol="UNKNOWN")
         res = self.ds.resolve(criteria)
         self.assertIsNone(res)
 
     def test_resolve_no_filtered_candidates(self):
         # Currency mismatch
-        criteria = SecurityCriteria(symbol="AAPL", currency="USD")
+        criteria = SecurityQuery(symbol="AAPL", currency="USD")
         self.mock_scraper.search.return_value = [
             Security(symbol="AAPL:EUR", name="Apple EUR", currency="EUR")
         ]
@@ -142,7 +141,7 @@ class TestFTDataSource(unittest.TestCase):
 
     def test_resolve_price_validation_fail(self):
         target_date = date(2023, 1, 1)
-        criteria = SecurityCriteria(symbol="AAPL", target_date=target_date, target_price=150.0)
+        criteria = SecurityQuery(symbol="AAPL", price_on=PriceOnDate(price=150.0, date=target_date))
         cand = Security(symbol="AAPL", name="Apple")
         self.mock_scraper.search.return_value = [cand]
         # Mock history showing mismatch
@@ -202,3 +201,37 @@ class TestFTDataSource(unittest.TestCase):
         res = self.ds.history(ticker, HistoryPeriod.D5)
         self.mock_scraper.get_history.assert_called()
         self.assertEqual(res.security.symbol.root, "AAPL")
+
+    def test_resolve_figi_searched_before_isin(self):
+        criteria = SecurityQuery(figi="BBG000B9XRY4", isin="US0378331005")
+        self.mock_scraper.search.return_value = [Security(symbol="AAPL", name="Apple")]
+
+        res = self.ds.resolve(criteria)
+
+        self.assertIsNotNone(res)
+        self.mock_scraper.search.assert_called_once_with("BBG000B9XRY4")
+
+    def test_resolve_figi_falls_back_to_isin(self):
+        def side_effect(query):
+            if query == "BBG000B9XRY4":
+                return []
+            return [Security(symbol="AAPL", name="Apple")]
+
+        self.mock_scraper.search.side_effect = side_effect
+        criteria = SecurityQuery(figi="BBG000B9XRY4", isin="US0378331005")
+
+        res = self.ds.resolve(criteria)
+
+        self.assertIsNotNone(res)
+        self.assertEqual(self.mock_scraper.search.call_count, 2)
+        self.mock_scraper.search.assert_any_call("BBG000B9XRY4")
+        self.mock_scraper.search.assert_any_call("US0378331005")
+
+    def test_resolve_figi_only(self):
+        criteria = SecurityQuery(figi="BBG000B9XRY4")
+        self.mock_scraper.search.return_value = [Security(symbol="AAPL", name="Apple")]
+
+        res = self.ds.resolve(criteria)
+
+        self.assertIsNotNone(res)
+        self.mock_scraper.search.assert_called_once_with("BBG000B9XRY4")

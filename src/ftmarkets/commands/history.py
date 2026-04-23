@@ -2,7 +2,13 @@ import logging
 import sys
 
 from pydantic_market_data.cli_models import HistoryArgs
-from pydantic_market_data.models import HistoryPeriod, Price, PriceVerificationError, StrictDate
+from pydantic_market_data.models import (
+    HistoryPeriod,
+    Price,
+    PriceOnDate,
+    PriceVerificationError,
+    StrictDate,
+)
 
 from .. import api
 from ..utils import parse_date
@@ -20,13 +26,16 @@ class HistoryCommand(HistoryArgs):
         target_date_vo = StrictDate(root=target_dt) if target_dt else None
         target_price_vo = Price(root=self.price) if self.price else None
 
-        # Use SecurityCriteria to resolve
-        criteria = api.SecurityCriteria(
+        price_on = (
+            PriceOnDate(price=target_price_vo, date=target_date_vo.root)
+            if target_price_vo and target_date_vo
+            else None
+        )
+        criteria = api.SecurityQuery(
             isin=self.isin,
             symbol=self.symbol,
             description=self.desc,
-            target_price=target_price_vo,
-            target_date=target_date_vo.root if target_date_vo else None,
+            price_on=price_on,
         )
 
         sym = ds.resolve(criteria)

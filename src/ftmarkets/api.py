@@ -9,7 +9,7 @@ from pydantic_market_data.models import (
     Price,
     PriceVerificationError,
     Security,
-    SecurityCriteria,
+    SecurityQuery,
     StrictDate,
     Symbol,
 )
@@ -17,7 +17,7 @@ from pydantic_market_data.models import (
 from .extract.scraper import Scraper, scraper
 
 # Re-export needed models for CLI
-__all__ = ["FTDataSource", "History", "OHLCV", "SecurityCriteria", "Security"]
+__all__ = ["FTDataSource", "History", "OHLCV", "SecurityQuery", "Security"]
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +36,16 @@ class FTDataSource(DataSource):
     def search(self, query: str) -> list[Security]:
         return self.scraper.search(query)
 
-    def resolve(self, criteria: SecurityCriteria) -> Security | None:
+    def resolve(self, criteria: SecurityQuery) -> Security | None:
         """
         Resolve a security based on criteria.
-        Checks for ISIN, Symbol, Description.
+        Checks for FIGI (preferred), ISIN, Symbol, Description.
         Validates against Price/Date if provided.
         """
         candidates: list[Security] = []
-        if criteria.isin:
+        if criteria.figi:
+            candidates = self.scraper.search(str(criteria.figi))
+        if not candidates and criteria.isin:
             candidates = self.scraper.search(str(criteria.isin))
         if not candidates and criteria.symbol:
             candidates = self.scraper.search(str(criteria.symbol))
@@ -97,11 +99,11 @@ class FTDataSource(DataSource):
             return None
 
         # Price validation
-        if criteria.target_price:
-            target_dt = self._ensure_datetime(criteria.target_date)
+        if criteria.price_on:
+            target_dt = self._ensure_datetime(criteria.price_on.date)
             days = self._get_required_history_days(target_dt)
 
-            tp = criteria.target_price
+            tp = criteria.price_on.price
             target_pr = Price(root=float(tp)) if isinstance(tp, (int, float)) else tp
 
             for cand in filtered:
