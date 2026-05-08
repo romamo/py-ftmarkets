@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-05-08
+
+### Added
+- **`price_tolerance` parameter**: `FTDataSource.validate()` now accepts a configurable `price_tolerance` float (default `0.10`) instead of a hardcoded 5% threshold.
+
+### Changed
+- **Dependency**: Bumped `pydantic-market-data` to `>=0.3.2`.
+
 ## [0.4.0] - 2026-04-23
 
 ### Changed

@@ -157,7 +157,13 @@ class FTDataSource(DataSource):
         days = days_map.get(period, 30)
         return self.scraper.get_history(symbol_val, days=days)
 
-    def validate(self, symbol: Symbol.Input, target_date: date, target_price: Price.Input) -> bool:
+    def validate(
+        self,
+        symbol: Symbol.Input,
+        target_date: date,
+        target_price: Price.Input,
+        price_tolerance: float = 0.10,
+    ) -> bool:
         """
         Validates if the symbol traded near the target price on the target date.
         """
@@ -169,10 +175,9 @@ class FTDataSource(DataSource):
 
         target_dt = self._ensure_datetime(target_date)
         days = self._get_required_history_days(target_dt)
-        # Fetch slightly more history to be safe
         hist = self.scraper.get_history(symbol_val, days=days + 10)
 
-        return self._check_price_match(hist, target_dt, price_val)
+        return self._check_price_match(hist, target_dt, price_val, price_tolerance)
 
     # --- Internal Helpers ---
 
@@ -209,7 +214,11 @@ class FTDataSource(DataSource):
         return None
 
     def _check_price_match(
-        self, history: History, target_dt: datetime, target_price: Price
+        self,
+        history: History,
+        target_dt: datetime,
+        target_price: Price,
+        price_tolerance: float = 0.10,
     ) -> bool:
         target_date = target_dt.date()
         target_price_val = target_price.root
@@ -237,17 +246,18 @@ class FTDataSource(DataSource):
             if low <= target_price_val <= high:
                 return True
 
-        # Close Check (5% tolerance)
+        # Close Check (tolerance)
         if close is not None:
             pct_diff = abs(close - target_price_val) / target_price_val
-            if pct_diff < 0.05:
+            if pct_diff < price_tolerance:
                 return True
 
         # If we reach here, it failed. Raise error with details.
+        tol_pct = int(price_tolerance * 100)
         msg = (
             f"Price {target_price_val} is outside daily range"
             if low is not None and high is not None
-            else f"Price {target_price_val} is not within 5% of close"
+            else f"Price {target_price_val} is not within {tol_pct}% of close"
         )
         raise PriceVerificationError(
             msg,
