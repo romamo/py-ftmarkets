@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from pydantic_market_data.models import Security
+from pydantic_market_data.models import AssetClass, Security
 
 from ftmarkets.client import FTClient
 from ftmarkets.extract.schemas import Symbol
@@ -105,7 +105,8 @@ def test_search_parsing(scraper, mock_client):
     assert str(sec.symbol) == "AAPL:NSQ"
     assert sec.name == "Apple Inc"
     assert str(sec.country) == "US"
-    assert sec.asset_class == "Equity"
+    assert sec.asset_class == AssetClass.EQUITY
+    assert sec.security_type == "Equity"
 
 
 def test_get_history(scraper, mock_client):
@@ -179,23 +180,27 @@ def test_search_tearsheet_redirect(scraper, mock_client):
     assert len(results) == 1
     assert str(results[0].symbol) == "AAPL:NSQ"
     assert str(results[0].isin) == "US0378331005"
-    assert results[0].asset_class == "Equity"
+    assert results[0].asset_class == AssetClass.EQUITY
+    assert results[0].security_type == "Equity"
 
     # Test other asset class redirects
     mock_client.get.return_value.url = (
         "https://markets.ft.com/data/etfs/tearsheet/summary?s=AAPL:NSQ"
     )
-    assert scraper.search("US0378331005")[0].asset_class == "ETF"
+    etf = scraper.search("US0378331005")[0]
+    assert (etf.asset_class, etf.security_type) == (AssetClass.EQUITY, "ETF")
 
     mock_client.get.return_value.url = (
         "https://markets.ft.com/data/funds/tearsheet/summary?s=AAPL:NSQ"
     )
-    assert scraper.search("US0378331005")[0].asset_class == "Fund"
+    fund = scraper.search("US0378331005")[0]
+    assert (fund.asset_class, fund.security_type) == (None, "Fund")
 
     mock_client.get.return_value.url = (
         "https://markets.ft.com/data/indices/tearsheet/summary?s=AAPL:NSQ"
     )
-    assert scraper.search("US0378331005")[0].asset_class == "Index"
+    index = scraper.search("US0378331005")[0]
+    assert (index.asset_class, index.security_type) == (AssetClass.INDEX, "Index")
 
     # Test no symbol code
     mock_client.get.return_value.url = "https://markets.ft.com/data/equities/tearsheet/summary"
@@ -268,13 +273,13 @@ def test_search_parsing_funds_and_etfs(scraper, mock_client):
 
     assert len(results) == 4
     assert str(results[0].symbol) == "FUND:EX"
-    assert results[0].asset_class == "Fund"
+    assert (results[0].asset_class, results[0].security_type) == (None, "Fund")
     assert str(results[1].symbol) == "IDX:EX"
-    assert results[1].asset_class == "Index"
+    assert (results[1].asset_class, results[1].security_type) == (AssetClass.INDEX, "Index")
     assert str(results[2].symbol) == "TEAR:SHEET"
     assert results[2].name == "Tear Sheet Link"
     assert str(results[3].symbol) == "FUND2:EX"
-    assert results[3].asset_class == "Fund"
+    assert (results[3].asset_class, results[3].security_type) == (None, "Fund")
 
 
 def test_extract_currency_heuristics(scraper):

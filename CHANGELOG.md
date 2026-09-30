@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-09-30
+
+### Changed
+- **`Security.asset_class` is an `AssetClass` enum**: search and tearsheet results map FT's categories to `pydantic-market-data`'s `AssetClass` (ETFs and equities to `EQUITY`, indices to `INDEX`, funds to `None`); the FT category name (`"ETF"`, `"Equity"`, `"Fund"`, `"Index"`) moves to `security_type`
+- **Dependency**: Bumped `pydantic-market-data` to `>=0.4.0`
+
+### Fixed
+- **Price validation with `pydantic-market-data` 0.4**: `resolve()` read `SecurityQuery.price_on` as a single point, but 0.4 makes it a list, so every price-validated resolve failed. A candidate now has to match every price point, from one history fetch starting at the earliest date
+
 ## [0.5.0] - 2026-05-08
 
 ### Added

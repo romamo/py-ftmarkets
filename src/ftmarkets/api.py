@@ -100,16 +100,22 @@ class FTDataSource(DataSource):
 
         # Price validation
         if criteria.price_on:
-            target_dt = self._ensure_datetime(criteria.price_on.date)
-            days = self._get_required_history_days(target_dt)
-
-            tp = criteria.price_on.price
-            target_pr = Price(root=float(tp)) if isinstance(tp, (int, float)) else tp
+            # A candidate must match every price point; one history fetch covers them all.
+            targets = [
+                (
+                    self._ensure_datetime(point.date),
+                    Price(root=float(point.price))
+                    if isinstance(point.price, (int, float))
+                    else point.price,
+                )
+                for point in criteria.price_on
+            ]
+            days = self._get_required_history_days(min(dt for dt, _ in targets))
 
             for cand in filtered:
                 try:
                     hist = self.scraper.get_history(cand.symbol, days=days)
-                    if self._check_price_match(hist, target_dt, target_pr):
+                    if all(self._check_price_match(hist, dt, pr) for dt, pr in targets):
                         return cand
                 except (PriceVerificationError, Exception) as e:
                     logger.debug("Candidate %s failed validation: %s", cand.symbol, e)

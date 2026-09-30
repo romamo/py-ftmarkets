@@ -10,7 +10,7 @@ from lxml import html
 from lxml.html import HtmlElement
 from pydantic_extra_types.country import CountryAlpha2
 from pydantic_extra_types.currency_code import Currency
-from pydantic_market_data.models import OHLCV, History, Security
+from pydantic_market_data.models import OHLCV, AssetClass, History, Security
 
 from ..client import FTClient, client
 from .schemas import (
@@ -67,21 +67,21 @@ class Scraper:
 
     def _parse_search_results(self, tree: HtmlElement, query: str) -> list[Security]:
         results: list[Security] = []
-        # Mapping for FT tab IDs/names to standard types
-        asset_class_map = {
-            "etf-panel": "ETF",
-            "equity-panel": "Equity",
-            "fund-panel": "Fund",
-            "index-panel": "Index",
-            "ETFs": "ETF",
-            "Equities": "Equity",
-            "Funds": "Fund",
-            "Indices": "Index",
-            "Indicies": "Index",
-            "etfs": "ETF",
-            "equities": "Equity",
-            "funds": "Fund",
-            "indices": "Index",
+        # Mapping for FT tab IDs/names to (AssetClass, security_type)
+        asset_class_map: dict[str, tuple[AssetClass | None, str | None]] = {
+            "etf-panel": (AssetClass.EQUITY, "ETF"),
+            "equity-panel": (AssetClass.EQUITY, "Equity"),
+            "fund-panel": (None, "Fund"),
+            "index-panel": (AssetClass.INDEX, "Index"),
+            "ETFs": (AssetClass.EQUITY, "ETF"),
+            "Equities": (AssetClass.EQUITY, "Equity"),
+            "Funds": (None, "Fund"),
+            "Indices": (AssetClass.INDEX, "Index"),
+            "Indicies": (AssetClass.INDEX, "Index"),
+            "etfs": (AssetClass.EQUITY, "ETF"),
+            "equities": (AssetClass.EQUITY, "Equity"),
+            "funds": (None, "Fund"),
+            "indices": (AssetClass.INDEX, "Index"),
         }
 
         xpath_query = (
@@ -92,12 +92,15 @@ class Scraper:
         # 1. Standard Panel Results
         for panel in panels:
             panel_id = panel.get("id")
-            asset_type = asset_class_map.get(panel_id)
-            if not asset_type:
+            ac_pair: tuple[AssetClass | None, str | None] = asset_class_map.get(
+                panel_id, (None, None)
+            )
+            if ac_pair == (None, None):
                 header = panel.xpath(".//h3")
                 if header:
                     ft_name = header[0].text.strip()
-                    asset_type = asset_class_map.get(ft_name, ft_name)
+                    ac_pair = asset_class_map.get(ft_name, (None, ft_name))
+            asset_class, security_type = ac_pair
 
             rows = panel.xpath('.//table[contains(@class, "mod-ui-table")]/tbody/tr')
             for row in rows:
@@ -108,7 +111,14 @@ class Scraper:
                     exchange = cols[2].text_content().strip() if len(cols) > 2 else None
                     country = cols[3].text_content().strip() if len(cols) > 3 else None
                     self._add_to_results(
-                        results, symbol_str, name, exchange, country, asset_type, query
+                        results,
+                        symbol_str,
+                        name,
+                        exchange,
+                        country,
+                        asset_class,
+                        security_type,
+                        query,
                     )
 
         # 2. Capture ALL tearsheet links on the page (covers "Best Match" and other lists)
@@ -121,12 +131,22 @@ class Scraper:
             symbol_str = qs.get("s", [None])[0]
             name = link.text_content().strip()
             if symbol_str and not any(str(r.symbol) == symbol_str for r in results):
-                link_asset_type = None
+                link_ac_pair: tuple[AssetClass | None, str | None] = (None, None)
                 for at_key in ["equities", "etfs", "funds", "indices"]:
                     if f"/{at_key}/" in href:
-                        link_asset_type = asset_class_map.get(at_key, at_key.capitalize())
+                        link_ac_pair = asset_class_map.get(at_key, (None, at_key.capitalize()))
                         break
-                self._add_to_results(results, symbol_str, name, None, None, link_asset_type, query)
+                link_asset_class, link_security_type = link_ac_pair
+                self._add_to_results(
+                    results,
+                    symbol_str,
+                    name,
+                    None,
+                    None,
+                    link_asset_class,
+                    link_security_type,
+                    query,
+                )
 
         return results
 
@@ -137,21 +157,22 @@ class Scraper:
         name: str,
         exchange: str | None,
         country: str | None,
-        asset_type: str | None,
+        asset_class: AssetClass | None,
+        security_type: str | None,
         query: str,
     ) -> None:
         country_code = self._map_country_to_code(country)
         currency = self._extract_currency(symbol) or self._map_country_to_currency(country_code)
         isin_val = query if self._is_isin(query) else None
 
-        # pass raw strings to Security model
         sec = Security(
             symbol=symbol,
             name=name,
             exchange=exchange,
             country=cast(CountryAlpha2 | None, country_code),
             currency=currency,
-            asset_class=asset_type,
+            asset_class=asset_class,
+            security_type=security_type,
             isin=str(isin_val) if isin_val else None,
         )
         results.append(sec)
@@ -176,17 +197,26 @@ class Scraper:
         # Validate strict Isin if extracted
         isin_val = Isin(root=isin).root if isin else (query if self._is_isin(query) else None)
 
-        asset_class = None
+        asset_class: AssetClass | None = None
+        security_type: str | None = None
         if "/etfs/" in url:
-            asset_class = "ETF"
+            asset_class, security_type = AssetClass.EQUITY, "ETF"
         elif "/equities/" in url:
-            asset_class = "Equity"
+            asset_class, security_type = AssetClass.EQUITY, "Equity"
         elif "/funds/" in url:
-            asset_class = "Fund"
+            security_type = "Fund"
         elif "/indices/" in url:
-            asset_class = "Index"
+            asset_class, security_type = AssetClass.INDEX, "Index"
 
-        return [Security(symbol=symbol_code, name=name, isin=isin_val, asset_class=asset_class)]
+        return [
+            Security(
+                symbol=symbol_code,
+                name=name,
+                isin=isin_val,
+                asset_class=asset_class,
+                security_type=security_type,
+            )
+        ]
 
     def get_history(self, symbol: Symbol.Input, days: int = 30) -> History:
         """

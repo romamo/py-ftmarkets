@@ -90,3 +90,46 @@ def test_validate_logic(datasource, mock_scraper):
     # Invalid (out of range/mismatch) - now raises per Fail Fast
     with pytest.raises(PriceVerificationError):
         datasource.validate(Symbol(root="T:EX"), target_date, Price(root=150.0))
+
+
+def _two_day_history() -> History:
+    return History(
+        security=Security(symbol="VALID:EX", name="Valid Ticker"),
+        candles=[
+            OHLCV(date=datetime(2023, 1, 15), open=100, high=105, low=95, close=100),
+            OHLCV(date=datetime(2023, 3, 15), open=200, high=205, low=195, close=200),
+        ],
+    )
+
+
+def test_resolve_price_validation_all_points_match(datasource, mock_scraper):
+    mock_scraper.search.return_value = [Security(symbol="VALID:EX", name="Valid Ticker")]
+    mock_scraper.get_history.return_value = _two_day_history()
+
+    criteria = SecurityQuery(
+        symbol="VALID",
+        price_on=[
+            PriceOnDate(price=200.0, date=datetime(2023, 3, 15)),
+            PriceOnDate(price=100.0, date=datetime(2023, 1, 15)),
+        ],
+    )
+
+    result = datasource.resolve(criteria)
+    assert result is not None
+    assert result.symbol.root == "VALID:EX"
+    mock_scraper.get_history.assert_called_once()
+
+
+def test_resolve_price_validation_one_point_mismatch_rejects(datasource, mock_scraper):
+    mock_scraper.search.return_value = [Security(symbol="VALID:EX", name="Valid Ticker")]
+    mock_scraper.get_history.return_value = _two_day_history()
+
+    criteria = SecurityQuery(
+        symbol="VALID",
+        price_on=[
+            PriceOnDate(price=100.0, date=datetime(2023, 1, 15)),
+            PriceOnDate(price=500.0, date=datetime(2023, 3, 15)),
+        ],
+    )
+
+    assert datasource.resolve(criteria) is None
