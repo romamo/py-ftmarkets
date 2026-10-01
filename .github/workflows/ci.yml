@@ -16,7 +16,7 @@ jobs:
           # - "3.11"
           # - "3.12"
           # - "3.13"
-          # - "3.14"
+          - "3.14"
       fail-fast: false
     steps:
       - name: Checkout
@@ -27,10 +27,13 @@ jobs:
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
-        continue-on-error: true
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --all-extras --dev --python ${{ matrix.python-version }}
 
       - name: Run tests
         run: uv run pytest
+
+      - name: Audit the CLI
+        if: matrix.python-version == '3.14'
+        run: uv run treaty audit ftmarkets.cli_app:app --strict

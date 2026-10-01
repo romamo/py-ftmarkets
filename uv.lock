@@ -941,8 +941,12 @@ dependencies = [
     { name = "pandas", version = "3.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pydantic" },
     { name = "pydantic-market-data" },
-    { name = "pydantic-settings" },
     { name = "requests" },
+]
+
+[package.optional-dependencies]
+cli = [
+    { name = "treaty", marker = "python_full_version >= '3.14'" },
 ]
 
 [package.dev-dependencies]
@@ -965,10 +969,11 @@ requires-dist = [
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-market-data", specifier = ">=0.4.0" },
-    { name = "pydantic-settings", specifier = ">=2.7.0" },
+    { name = "pydantic-market-data", specifier = ">=0.5.0" },
     { name = "requests", specifier = ">=2.32.5" },
+    { name = "treaty", marker = "python_full_version >= '3.14' and extra == 'cli'", specifier = "==1.0.0rc10" },
 ]
+provides-extras = ["cli"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1140,7 +1145,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-market-data"
-version = "0.4.1"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1150,9 +1155,9 @@ dependencies = [
     { name = "pydantic-extra-types" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c3/3e/bc976134278580bfe55f711141d390109522dfd8f57325958f039148b168/pydantic_market_data-0.4.1.tar.gz", hash = "sha256:daa5e64fcbaea1eb18ed179cc94eae0b1875625c1ed5c1351ca813f4e18dc77f", size = 15988, upload-time = "2026-05-09T09:45:21.378Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/6b/058e7252b1e1d62438123af83fe51c9d871b6d44a068ad7e8116a5188526/pydantic_market_data-0.5.0.tar.gz", hash = "sha256:832cab6671e3fe883dc5a3cc916097e311eb41309d95ca194c30866b4b20474b", size = 20664, upload-time = "2026-10-01T13:50:21.176Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/6c/18de881a50a0e60d08d7cee4338800e19ba01204780e76941a30a41dd271/pydantic_market_data-0.4.1-py3-none-any.whl", hash = "sha256:dda36c94cdaeaafbebc548c737aa1fe205efcf109f27326ddf78481e259c9890", size = 10226, upload-time = "2026-05-09T09:45:20.431Z" },
+    { url = "https://files.pythonhosted.org/packages/39/ba/59d8c418dc34acd270f2530721328307e4a462d69e702287fcfa320001bb/pydantic_market_data-0.5.0-py3-none-any.whl", hash = "sha256:3cf19d7bcacf44f6e8682ae5b60d3dfd6944e169710cb7cecf2f0c2ddd9ad052", size = 10860, upload-time = "2026-10-01T13:50:20.09Z" },
 ]
 
 [[package]]
@@ -1436,6 +1441,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/de/69/9aa0c6a505c2f80e519b43764f8b4ba93b5a0bbd2d9a9de6e2b24271b9a5/tomli-2.4.0-cp314-cp314t-win_amd64.whl", hash = "sha256:2add28aacc7425117ff6364fe9e06a183bb0251b03f986df0e78e974047571fd", size = 120504, upload-time = "2026-01-11T11:22:35.764Z" },
     { url = "https://files.pythonhosted.org/packages/b3/9f/f1668c281c58cfae01482f7114a4b88d345e4c140386241a1a24dcc9e7bc/tomli-2.4.0-cp314-cp314t-win_arm64.whl", hash = "sha256:2b1e3b80e1d5e52e40e9b924ec43d81570f0e7d09d11081b797bc4692765a3d4", size = 99561, upload-time = "2026-01-11T11:22:36.624Z" },
     { url = "https://files.pythonhosted.org/packages/23/d1/136eb2cb77520a31e1f64cbae9d33ec6df0d78bdf4160398e86eec8a8754/tomli-2.4.0-py3-none-any.whl", hash = "sha256:1f776e7d669ebceb01dee46484485f43a4048746235e683bcdffacdf1fb4785a", size = 14477, upload-time = "2026-01-11T11:22:37.446Z" },
+]
+
+[[package]]
+name = "treaty"
+version = "1.0.0rc10"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/fc/d20b8b58e214bcec8dce6c7f24f9356760330a9fa1cf5675cfab3cad0d1b/treaty-1.0.0rc10.tar.gz", hash = "sha256:410fa7e0fbe58c6d4b09188a8e34ac28e02b00581737da197876ddd8d5ff76b2", size = 477923, upload-time = "2026-10-01T12:55:22.599Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/ab/0abc9621bd36885d4b1966d259701272e10c69e0daf6ae41c665e3dc14a7/treaty-1.0.0rc10-py3-none-any.whl", hash = "sha256:28ccbafe5aafae074ad769be7f6bd7d54d134d80c1938546294ec97d75d7c94d", size = 482571, upload-time = "2026-10-01T12:55:20.959Z" },
 ]
 
 [[package]]

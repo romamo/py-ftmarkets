@@ -12,36 +12,49 @@ pip install py-ftmarkets
 
 ## CLI Usage
 
-The package provides a CLI tool named `ftmarkets`.
+The `ftmarkets` CLI is built on [treaty](https://pypi.org/project/treaty/) and needs Python 3.14 and the `cli` extra. The library itself still supports Python 3.10 and later; on an older Python, or without the extra, `ftmarkets` exits 1 and says how to install it.
+
+```bash
+uv tool install --python 3.14 "py-ftmarkets[cli]"
+# or, in a Python 3.14 environment
+pip install "py-ftmarkets[cli]"
+```
+
+`--format` takes `plain` (the default on a terminal), `json` (the full response envelope with `ok`, `data`, `error`, `warnings`, and `meta`; the default when piped), `jsonl`, `ndjson`, and `tsv`. `-v` and `-vv` show info and debug logs on stderr. `ftmarkets <command> --help` lists the flags and `--schema` the input and output schemas.
+
+Exit codes: `0` success, `2` invalid arguments (nothing ran), `5` security or history not found, `79` the price check failed (`history --price`).
 
 ### Lookup a Security
 
-Resolve an ISIN or Symbol to the Financial Times symbol format (e.g., `AAPL:NSQ`).
+Resolve an ISIN or Symbol to the Financial Times symbol format (e.g., `AAPL:NSQ`). Results keep FT's relevance order; `--limit` defaults to 1 and `--limit 0` returns every match.
 
 ```bash
 # Basic lookup by ISIN
 ftmarkets lookup --isin DE000A0S9GB0
 
-# Lookup with price and date validation (Returns 1 best matching security)
-ftmarkets lookup --isin DE000A0S9GB0 --price 117.81 --date 2025-12-12 --limit 1
+# Keep only matches that traded near a price on a date (--price needs --date)
+ftmarkets lookup --isin DE000A0S9GB0 --price 117.81 --date 2025-12-12
 
-# Lookup with filters (currency, country, asset-class)
+# Lookup with filters (currency, country, asset class or FT security type, exchange)
 ftmarkets lookup --isin DE000A0S9GB0 --currency EUR --country DE --asset-class ETF
 
-# Return all matching results in JSON format
+# Every match as a JSON envelope; the securities are in .data
 ftmarkets lookup --isin DE000A0S9GB0 --limit 0 --format json
+
+# Every match as a table
+ftmarkets lookup --isin DE000A0S9GB0 --limit 0 --format tsv
 ```
 
 ### Fetch History and Validate
 
-Fetch historical data for a resolved security and optionally validate a trade price on a specific date.
+Fetch historical data for a resolved security and optionally validate a trade price on a specific date. The result holds the resolved `security`, its `history` (candles in ascending date order), and `validated` (`true` when the price matched, `null` without `--price`).
 
 ```bash
 # Fetch 1 month of history for an ISIN
 ftmarkets history --isin DE000A0S9GB0
 
-# Fetch 1 year of history and validate a price
-ftmarkets history --isin DE000A0S9GB0 --period 1y --price 120.50 --date 2025-01-15
+# Fetch 1 year of history and validate a price; exits 79 (PRICE_MISMATCH) when it does not match
+ftmarkets history --isin DE000A0S9GB0 --period 1y --price 120.50 --date 2025-01-15 --format json
 ```
 
 ## Library Usage
