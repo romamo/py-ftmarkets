@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.6.0] - 2026-10-01
 
 ### Changed
 - **BREAKING: the CLI is built on treaty and needs Python 3.14**: install it with `pip install "py-ftmarkets[cli]"` on Python 3.14 (the new `cli` extra pins `treaty==1.0.0rc10`). The library still supports Python 3.10; on an older Python, or without the extra, `ftmarkets` exits 1 naming the running Python and the install command (#2)
