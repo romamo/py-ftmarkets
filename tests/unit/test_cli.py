@@ -92,6 +92,12 @@ def error(envelope: Envelope) -> dict:
     return found
 
 
+def pagination(envelope: Envelope) -> dict:
+    found = envelope.to_json()["meta"]["pagination"]
+    assert isinstance(found, dict)
+    return found
+
+
 def symbols(data: object) -> list[str]:
     assert isinstance(data, list)
     return [item["symbol"] for item in data]
@@ -114,12 +120,32 @@ def test_price_without_date_exits_2(command):
     assert source.validated == []
 
 
-def test_malformed_date_exits_2():
+@pytest.mark.parametrize("command", ["lookup", "history"])
+@pytest.mark.parametrize("value", ["15.01.2025", "15/01/2025", "01/02/2025", "Jan 15 2025"])
+def test_non_year_first_date_exits_2(command, value):
+    source = FakeSource(APPLE, matching={"AAPL:NSQ"})
+    envelope = create_app(source).call(command, {"symbol": "AAPL", "price": 150.0, "date": value})
+    assert envelope.exit_code == 2
+    assert error(envelope)["errors"][0]["field"] == "date"
+    assert source.validated == []
+
+
+@pytest.mark.parametrize("command", ["lookup", "history"])
+def test_impossible_date_exits_2(command):
     envelope = create_app(FakeSource(APPLE)).call(
-        "lookup", {"symbol": "AAPL", "price": 150.0, "date": "15.01.2025"}
+        command, {"symbol": "AAPL", "price": 150.0, "date": "2025-13-01"}
     )
     assert envelope.exit_code == 2
     assert error(envelope)["errors"][0]["field"] == "date"
+
+
+@pytest.mark.parametrize("command", ["lookup", "history"])
+@pytest.mark.parametrize("value", ["2025-01-15", "2025/01/15", "20250115"])
+def test_year_first_date_formats_are_accepted(command, value):
+    source = FakeSource(APPLE, matching={"AAPL:NSQ"})
+    envelope = create_app(source).call(command, {"symbol": "AAPL", "price": 150.0, "date": value})
+    assert envelope.exit_code == 0
+    assert source.validated == ["AAPL:NSQ"]
 
 
 def test_bad_period_exits_2():
@@ -139,6 +165,26 @@ def test_lookup_keeps_the_source_order():
 def test_lookup_defaults_to_one_result():
     envelope = create_app(FakeSource(APPLE)).call("lookup", {"isin": "US0378331005"})
     assert symbols(envelope.data) == ["AAPL:NSQ"]
+    assert pagination(envelope)["has_more"] is True
+    assert pagination(envelope)["total"] == 3
+
+
+def test_lookup_pages_keep_the_source_order():
+    app = create_app(FakeSource(APPLE))
+    first = app.call("lookup", {"isin": "US0378331005", "limit": 2})
+    assert symbols(first.data) == ["AAPL:NSQ", "0R2V:LSE"]
+    cursor = pagination(first)["next_cursor"]
+    second = app.call("lookup", {"isin": "US0378331005", "limit": 2, "cursor": cursor})
+    assert symbols(second.data) == ["APC:FRA"]
+    assert pagination(second)["has_more"] is False
+
+
+def test_lookup_cursor_from_other_arguments_exits_2():
+    app = create_app(FakeSource(APPLE))
+    cursor = pagination(app.call("lookup", {"isin": "US0378331005"}))["next_cursor"]
+    envelope = app.call("lookup", {"isin": "US0378331005", "currency": "EUR", "cursor": cursor})
+    assert envelope.exit_code == 2
+    assert error(envelope)["code"] == "INVALID_CURSOR"
 
 
 def test_lookup_filters_by_currency():
@@ -148,13 +194,28 @@ def test_lookup_filters_by_currency():
     assert symbols(envelope.data) == ["APC:FRA"]
 
 
-def test_lookup_filters_by_asset_class_or_security_type():
-    etf = Security(symbol="EXS1:GER", name="iShares", asset_class="equity", security_type="ETF")
-    source = FakeSource([*APPLE, etf])
-    by_type = create_app(source).call("lookup", {"desc": "x", "asset_class": "etf", "limit": 0})
-    by_class = create_app(source).call("lookup", {"desc": "x", "asset_class": "EQUITY", "limit": 0})
-    assert symbols(by_type.data) == ["EXS1:GER"]
-    assert symbols(by_class.data) == ["EXS1:GER"]
+ETF = Security(symbol="EXS1:GER", name="iShares", asset_class="equity", security_type="ETF")
+INDEX = Security(symbol="DAX:GER", name="DAX", asset_class="index", security_type="Index")
+
+
+def test_lookup_filters_by_asset_class():
+    source = FakeSource([*APPLE, ETF, INDEX])
+    by_class = create_app(source).call("lookup", {"desc": "x", "asset_class": "index", "limit": 0})
+    assert symbols(by_class.data) == ["DAX:GER"]
+    equity = create_app(source).call("lookup", {"desc": "x", "asset_class": "equity", "limit": 0})
+    assert symbols(equity.data) == ["EXS1:GER"]
+
+
+def test_lookup_asset_class_outside_the_enum_exits_2():
+    envelope = create_app(FakeSource([ETF])).call("lookup", {"desc": "x", "asset_class": "ETF"})
+    assert envelope.exit_code == 2
+    assert error(envelope)["errors"][0]["field"] == "asset-class"
+
+
+def test_lookup_filters_by_security_type_in_any_case():
+    source = FakeSource([*APPLE, ETF, INDEX])
+    envelope = create_app(source).call("lookup", {"desc": "x", "security_type": "etf", "limit": 0})
+    assert symbols(envelope.data) == ["EXS1:GER"]
 
 
 def test_lookup_not_found():
@@ -171,6 +232,7 @@ def test_lookup_price_validation_keeps_only_matches():
     assert envelope.exit_code == 0
     assert symbols(envelope.data) == ["APC:FRA"]
     assert source.validated == ["AAPL:NSQ", "0R2V:LSE", "APC:FRA"]
+    assert pagination(envelope)["has_more"] is False
 
 
 def test_lookup_price_validation_stops_at_the_limit():
@@ -180,6 +242,30 @@ def test_lookup_price_validation_stops_at_the_limit():
     )
     assert symbols(envelope.data) == ["AAPL:NSQ"]
     assert source.validated == ["AAPL:NSQ"]
+    assert pagination(envelope)["has_more"] is True
+
+
+def test_lookup_price_validation_next_page_resumes_the_scan():
+    source = FakeSource(APPLE, matching={"AAPL:NSQ", "APC:FRA"})
+    app = create_app(source)
+    query = {"isin": "US0378331005", "price": 150.0, "date": "2025-01-15"}
+    cursor = pagination(app.call("lookup", query))["next_cursor"]
+    second = app.call("lookup", {**query, "cursor": cursor})
+    assert symbols(second.data) == ["APC:FRA"]
+    assert pagination(second)["has_more"] is False
+    # The second page validates only the candidates after the first page's scan
+    assert source.validated == ["AAPL:NSQ", "0R2V:LSE", "APC:FRA"]
+
+
+def test_lookup_price_validation_last_page_may_be_empty():
+    source = FakeSource(APPLE, matching={"AAPL:NSQ"})
+    app = create_app(source)
+    query = {"isin": "US0378331005", "price": 150.0, "date": "2025-01-15"}
+    cursor = pagination(app.call("lookup", query))["next_cursor"]
+    second = app.call("lookup", {**query, "cursor": cursor})
+    assert second.exit_code == 0
+    assert second.data == []
+    assert pagination(second)["has_more"] is False
 
 
 def test_lookup_price_validation_without_a_match_is_not_found():

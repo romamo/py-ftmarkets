@@ -26,17 +26,26 @@ Exit codes: `0` success, `2` invalid arguments (nothing ran), `5` security or hi
 
 ### Lookup a Security
 
-Resolve an ISIN or Symbol to the Financial Times symbol format (e.g., `AAPL:NSQ`). Results keep FT's relevance order; `--limit` defaults to 1 and `--limit 0` returns every match.
+Resolve an ISIN or Symbol to the Financial Times symbol format (e.g., `AAPL:NSQ`). Results keep FT's relevance order. `--limit` defaults to 1 (the best match) and `--limit 0` returns every match; when more matches exist, `meta.pagination.next_cursor` (or the stderr hint in text formats) is the `--cursor` for the next page.
+
+`--asset-class` takes one of `equity`, `fixed_income`, `cash`, `commodity`, `real_estate`, `fx`, `crypto`, `derivative`, `alternative`, or `index`; `--security-type` matches FT's own category (`ETF`, `Fund`, `Equity`, `Index`) in any case. `--date` is `YYYY-MM-DD`, `YYYY/MM/DD`, or `YYYYMMDD`.
 
 ```bash
 # Basic lookup by ISIN
 ftmarkets lookup --isin DE000A0S9GB0
 
+# The three best matches, then the next three
+ftmarkets lookup --isin US0378331005 --limit 3 --format json
+ftmarkets lookup --isin US0378331005 --limit 3 --cursor <meta.pagination.next_cursor>
+
 # Keep only matches that traded near a price on a date (--price needs --date)
 ftmarkets lookup --isin DE000A0S9GB0 --price 117.81 --date 2025-12-12
 
-# Lookup with filters (currency, country, asset class or FT security type, exchange)
-ftmarkets lookup --isin DE000A0S9GB0 --currency EUR --country DE --asset-class ETF
+# Lookup with filters (currency, country, FT security type, exchange)
+ftmarkets lookup --isin DE000A0S9GB0 --currency EUR --country DE --security-type ETF
+
+# Only equity listings (asset class)
+ftmarkets lookup --isin US0378331005 --asset-class equity --limit 0
 
 # Every match as a JSON envelope; the securities are in .data
 ftmarkets lookup --isin DE000A0S9GB0 --limit 0 --format json
