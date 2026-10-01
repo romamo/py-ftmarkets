@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **CLI `lookup --security-type`**: matches FT's security type (`ETF`, `Fund`, `Equity`, `Index`) case-insensitively; it takes over the FT-category half of the old `--asset-class` (#4)
+- **CLI `lookup --cursor`**: when more matches exist than `--limit`, `meta.pagination.next_cursor` pages through them in FT's relevance order. With `--price`, a page validates only as many candidates as it needs, and the next page resumes the scan where it stopped, so the last page can be empty (#4)
+
+### Changed
+- **BREAKING: CLI `lookup --asset-class`** takes only `pydantic-market-data`'s `AssetClass` values in lower case (`equity`, `fixed_income`, `cash`, `commodity`, `real_estate`, `fx`, `crypto`, `derivative`, `alternative`, `index`) and matches the security's asset class only; any other value (`ETF`, `Fund`, `Equity`) exits 2. Use `--security-type ETF` for FT's categories (#4)
+- **BREAKING: CLI `--date`** accepts `YYYY-MM-DD`, `YYYY/MM/DD`, or `YYYYMMDD`; `DD/MM/YYYY` and other day- or month-first dates now exit 2 instead of being read day first (#4)
+- **CLI `lookup --limit`** is treaty's framework flag: it still defaults to 1 and `0` still returns every match, and the response's `meta.pagination` now carries `total`, `has_more`, and `next_cursor` (#4)
+- **Dependency**: Bumped `pydantic-market-data` to `>=0.6.1`; the CLI uses its `FlexibleDate` and `AssetClass` argument types (#4)
+- **Dependency**: The `cli` extra pins `treaty==1.0.0rc11` (#4)
+
 ## [0.6.0] - 2026-10-01
 
 ### Changed

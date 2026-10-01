@@ -5,6 +5,7 @@ and that treaty is installed first. ``create_app`` takes the data source, so tes
 every command in-process through ``App.call`` against a fake source.
 """
 
+import re
 from datetime import date
 from importlib.metadata import version
 
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic_market_data.cli_models import HistoryQueryArgs, SecurityQueryArgs
 from pydantic_market_data.interfaces import DataSource
 from pydantic_market_data.models import (
+    FlexibleDate,
     History,
     Price,
     PriceOnDate,
@@ -20,26 +22,21 @@ from pydantic_market_data.models import (
     Security,
     SecurityQuery,
 )
-from treaty import App, Ctx, Exit, RequiresAny
+from treaty import App, Ctx, Exit, Page, ParseError, RequiresAny
 
 from .api import FTDataSource
 from .extract.scraper import ScraperError
-from .utils import parse_date
 
-_DATE_FORMATS = "YYYY-MM-DD, YYYYMMDD, or DD/MM/YYYY"
+_DATE_FORMATS = "YYYY-MM-DD, YYYY/MM/DD, or YYYYMMDD"
+# FlexibleDate parses through pandas, which also takes 01/02/2025 (month first) and
+# other ambiguous shapes; the CLI admits only year-first dates
+_YEAR_FIRST = re.compile(r"\d{4}([-/]?)\d{2}\1\d{2}")
 _IDENTIFIERS = ("isin", "symbol", "desc")
 
 
-def _parsed_date(value: str) -> date:
-    parsed = parse_date(value)
-    if parsed is None:
+def _check_date_format(value: object) -> object:
+    if isinstance(value, str) and not _YEAR_FIRST.fullmatch(value):
         raise ValueError(f"date {value!r} is not {_DATE_FORMATS}")
-    return parsed.date()
-
-
-def _check_date(value: str | None) -> str | None:
-    if value is not None:
-        _parsed_date(value)
     return value
 
 
@@ -53,14 +50,26 @@ def _check_price_has_date(price: float | None, info: ValidationInfo) -> float | 
 class LookupArgs(SecurityQueryArgs):
     """Lookup a security by ISIN, symbol, or description"""
 
-    _date = field_validator("date")(_check_date)
+    date: FlexibleDate | None = Field(
+        None, description=f"Date the --price is checked on ({_DATE_FORMATS})"
+    )
+    security_type: str | None = Field(
+        None,
+        description="FT security type (ETF, Fund, Equity, Index), case-insensitive",
+    )
+
+    _date = field_validator("date", mode="before")(_check_date_format)
     _price = field_validator("price")(_check_price_has_date)
 
 
 class HistoryArgs(HistoryQueryArgs):
     """Fetch history for a security and optionally validate a price"""
 
-    _date = field_validator("date")(_check_date)
+    date: FlexibleDate | None = Field(
+        None, description=f"Date the --price is checked on ({_DATE_FORMATS})"
+    )
+
+    _date = field_validator("date", mode="before")(_check_date_format)
     _price = field_validator("price")(_check_price_has_date)
 
 
@@ -83,14 +92,13 @@ def _matches(security: Security, args: LookupArgs) -> bool:
         not security.country or str(security.country).upper() != str(args.country).upper()
     ):
         return False
-    if args.asset_class:
-        wanted = str(args.asset_class).upper()
-        kinds = {
-            security.asset_class.value.upper() if security.asset_class else None,
-            security.security_type.upper() if security.security_type else None,
-        }
-        if wanted not in kinds:
-            return False
+    if args.asset_class is not None and security.asset_class != args.asset_class:
+        return False
+    if args.security_type is not None and (
+        not security.security_type
+        or security.security_type.casefold() != args.security_type.casefold()
+    ):
+        return False
     if args.exchange and (
         not security.exchange or args.exchange.lower() not in security.exchange.lower()
     ):
@@ -113,34 +121,51 @@ def _price_matches(
     return False
 
 
-def run_lookup(source: DataSource, args: LookupArgs, ctx: Ctx) -> list[Security]:
+def _check_scan_cursor(cursor: str) -> None:
+    """``lookup``'s own cursor: how many candidates the price check already went through"""
+    if not (cursor.isascii() and cursor.isdigit()):
+        raise ParseError(f"lookup cursor {cursor!r} is not a candidate count")
+
+
+def run_lookup(source: DataSource, args: LookupArgs, ctx: Ctx) -> Page[Security]:
+    """The matches in FT's relevance order; treaty slices them to ``--limit``
+
+    With ``--price`` each candidate costs an FT history fetch, so the scan stops once it
+    has a page and hands back how many candidates it went through as its cursor; the
+    next page resumes the scan there.
+    """
     query = args.isin or args.symbol or args.desc
     if query is None:
         raise ValueError("lookup ran without an identifier; RequiresAny should refuse that")
+    if ctx.page is None:
+        raise ValueError("lookup ran without a page request; it is a list command")
     found = [s for s in source.search(query) if _matches(s, args)]
+    resumed = ctx.page.cursor
 
-    if args.price is not None and args.date is not None:
-        on = _parsed_date(args.date)
-        price = Price(root=args.price)
-        validated: list[Security] = []
-        for security in found:
-            if args.limit > 0 and len(validated) >= args.limit:
-                break
-            if _price_matches(source, security, on, price, ctx):
-                validated.append(security)
-        found = validated
-    elif args.limit > 0:
-        found = found[: args.limit]
+    if args.price is None or args.date is None:
+        if not found:
+            raise Exit.NOT_FOUND("Security not found", context={"query": query})
+        return Page(items=found, total=len(found))
 
-    if not found:
+    price = Price(root=args.price)
+    scanned = 0 if resumed is None else int(resumed)
+    validated: list[Security] = []
+    for security in found[scanned:]:
+        if ctx.page.limit is not None and len(validated) >= ctx.page.limit:
+            break
+        scanned += 1
+        if _price_matches(source, security, args.date, price, ctx):
+            validated.append(security)
+    if resumed is None and not validated:
         raise Exit.NOT_FOUND("Security not found", context={"query": query})
-    return found
+    more = scanned < len(found)
+    return Page(items=validated, next_cursor=str(scanned) if more else None)
 
 
 def run_history(source: DataSource, args: HistoryArgs, ctx: Ctx) -> HistoryResult:
     price_on = None
     if args.price is not None and args.date is not None:
-        price_on = PriceOnDate(price=Price(root=args.price), date=_parsed_date(args.date))
+        price_on = PriceOnDate(price=Price(root=args.price), date=args.date)
     criteria = SecurityQuery(
         isin=args.isin,
         symbol=args.symbol,
@@ -156,7 +181,7 @@ def run_history(source: DataSource, args: HistoryArgs, ctx: Ctx) -> HistoryResul
         if price_on is not None and (other := source.resolve(unpriced)) is not None:
             raise Exit.PRICE_MISMATCH(
                 f"{other.symbol} did not trade near {args.price} on {args.date}",
-                context={"symbol": str(other.symbol), "price": args.price, "date": args.date},
+                context={"symbol": str(other.symbol), "price": args.price, "date": str(args.date)},
             )
         raise Exit.NOT_FOUND("Could not resolve the security", context=identifiers)
     ctx.log("resolved", symbol=str(security.symbol))
@@ -174,12 +199,20 @@ def run_history(source: DataSource, args: HistoryArgs, ctx: Ctx) -> HistoryResul
         except PriceVerificationError as exc:
             raise Exit.PRICE_MISMATCH(
                 str(exc),
-                context={"symbol": str(security.symbol), "price": args.price, "date": args.date},
+                context={
+                    "symbol": str(security.symbol),
+                    "price": args.price,
+                    "date": str(args.date),
+                },
             ) from exc
         if not validated:
             raise Exit.PRICE_MISMATCH(
                 f"{security.symbol} did not trade near {args.price} on {args.date}",
-                context={"symbol": str(security.symbol), "price": args.price, "date": args.date},
+                context={
+                    "symbol": str(security.symbol),
+                    "price": args.price,
+                    "date": str(args.date),
+                },
             )
     return HistoryResult(security=security, history=history, validated=validated)
 
@@ -226,17 +259,22 @@ def create_app(source: DataSource) -> App:
                 "ftmarkets lookup --isin DE000A0S9GB0 --limit 0 --format json",
             ),
             (
+                "Only ETFs, in euros",
+                "ftmarkets lookup --isin DE000A0S9GB0 --security-type ETF --currency EUR",
+            ),
+            (
                 "Keep matches that traded near a price on a date",
                 "ftmarkets lookup --isin DE000A0S9GB0 --price 117.81 --date 2025-12-12",
             ),
         ],
         has_network_io=True,
         external=True,
-        paginated=False,
         ordered=True,
+        default_limit=1,
+        cursor_check=_check_scan_cursor,
         requires=[RequiresAny(_IDENTIFIERS)],
     )
-    def lookup(args: LookupArgs, ctx: Ctx) -> list[Security]:
+    def lookup(args: LookupArgs, ctx: Ctx) -> Page[Security]:
         return run_lookup(source, args, ctx)
 
     @app.command(
