@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **BREAKING: the CLI is built on treaty and needs Python 3.14**: install it with `pip install "py-ftmarkets[cli]"` on Python 3.14 (the new `cli` extra pins `treaty==1.0.0rc10`). The library still supports Python 3.10; on an older Python, or without the extra, `ftmarkets` exits 1 naming the running Python and the install command (#2)
+- **BREAKING: CLI output**: `--format json` writes treaty's response envelope (`ok`, `data`, `error`, `warnings`, `meta`) instead of a bare list; `lookup` returns a list of securities (each marked `_source: external`, `_trusted: false`, with an `UNTRUSTED_CONTENT` warning), and `history` returns `{security, history, validated}` instead of printing "Resolved to:", a pandas table, and "VALIDATION PASSED". The default format is `plain` on a terminal and `json` when piped; `jsonl`, `ndjson`, and `tsv` are also available (#2)
+- **BREAKING: CLI exit codes**: invalid arguments exit 2 before anything runs (no `--isin`/`--symbol`/`--desc`, `--price` without `--date`, a malformed `--date`, an unknown `--period`); a security or history not found exits 5 (`NOT_FOUND`) instead of 1; a failed price check in `history` exits 79 (`PRICE_MISMATCH`) instead of 1 (#2)
+- **CLI `lookup --asset-class`** matches the security's asset class (`equity`, `index`, ...) or FT's security type (`ETF`, `Fund`, ...), case-insensitively; it matched nothing since 0.5.1 made `asset_class` an enum (#2)
+- **Dependency**: Bumped `pydantic-market-data` to `>=0.5.0` and use its `SecurityQueryArgs`/`HistoryQueryArgs` (#2)
+
+### Removed
+- **BREAKING: CLI `--format xml`** and the `text` format; use `plain`, `json`, `jsonl`, `ndjson`, or `tsv` (#2)
+- **BREAKING: CLI `--v`/`--vv` and `--schema` from `pydantic-market-data`'s `GlobalArgs`**: treaty's `-v`/`--verbose`, `-vv`/`--debug`, and `--schema` replace them (#2)
+- **`ftmarkets.commands`** (`LookupCommand`, `HistoryCommand`) and `ftmarkets.cli.setup_logging`/`AppCLI`; the CLI lives in `ftmarkets.cli_app` (#2)
+- **Dependency**: `pydantic-settings` is no longer a direct dependency (#2)
+
 ## [0.5.1] - 2026-09-30
 
 ### Changed
