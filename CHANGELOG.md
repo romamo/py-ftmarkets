@@ -9,12 +9,19 @@ All notable changes to this project will be documented in this file.
 - **BREAKING: `SecurityQuery.price_on` dates**: `pydantic-market-data` 0.7.0 makes `FlexibleDate` accept only `YYYY-MM-DD`, `YYYY/MM/DD`, or `YYYYMMDD` strings (or `date`/`datetime` objects) and reject impossible dates, so a `SecurityQuery` (re-exported from `ftmarkets.api`) or `PriceOnDate` built from any other date string, such as `15/01/2025`, now raises `ValidationError` before it reaches `FTDataSource.resolve()`. `ftmarkets.utils.parse_date` is unchanged
 - **Search results set `isin` only from a valid ISIN query**: rows of FT's search-results table carry the query as `isin` only when it is a valid ISIN (format and checksum); the other tearsheet links on the page (best matches, which may be unrelated) no longer get it. An exact-match tearsheet takes the ISIN printed on the page, else the query when it is a valid ISIN (#7)
 - **`ftmarkets.extract.schemas.Isin` removed**: the scraper uses `pydantic-market-data`'s `ISIN` value object instead (#7)
+- **BREAKING: `FTDataSource.resolve()` no longer swallows errors**: during a price check only `PriceVerificationError` moves on to the next candidate; a `ScraperError`, an HTTP or connection error, or any other exception now propagates instead of turning into `None`, so the CLI's `history --price` reports the failure rather than NOT_FOUND or PRICE_MISMATCH (#9)
+- **BREAKING: `FTDataSource.resolve()` filters on `SecurityQuery.asset_class` for every `AssetClass`**: it keeps candidates whose `asset_class` equals the query's. Before, `fixed_income`, `cash`, `commodity`, `real_estate`, `fx`, `crypto`, `derivative`, and `alternative` returned `None` without searching the candidates; `equity` and `index` behave as before (#9)
+- **BREAKING: `FTDataSource.resolve()` filters on `SecurityQuery.exchange`**: it keeps candidates whose exchange contains the query's, case-insensitively (as `lookup --exchange` does), and drops candidates with no exchange; it used to ignore the field, so `history --exchange` now picks that listing (#9)
+- **BREAKING: `FTDataSource.validate()` and `resolve()` reject a target price of 0 or less** with `ValueError` before fetching anything; `pydantic-market-data`'s `Price` accepts any float (#9)
+- **`FTDataSource.history(period=HistoryPeriod.D1)`** fetches 5 calendar days and returns only the latest candle, so it has a candle on a Monday or after a holiday (#9)
+- **`FTDataSource`** takes an optional `today` callable (default `date.today`) that `history(period=HistoryPeriod.YTD)` counts from (#9)
 
 ### Fixed
 - **`search()` crashed on 12-character non-ISIN queries** such as `AMAZONCOMINC`, which were taken for ISINs and failed `Security` validation; they now leave `isin` unset (#7)
 - **Search `exchange` included FT's badge text**: `London Stock ExchangePrimary` is now `London Stock Exchange` (#7)
 - **Search results section headers and tearsheet names with child elements** no longer crash parsing (#7)
 - **A tearsheet stating an invalid ISIN** now raises `ScraperError` naming the value instead of a `Security` `ValidationError` (#7)
+- **`FTDataSource.history(period=HistoryPeriod.YTD)`** fetched 30 days; it now fetches the days since 1 January. An unmapped period raises `KeyError` instead of falling back to 30 days (#9)
 - **CLI `--date`**: still accepts the same three formats and still exits 2 on anything else, but the check is now `pydantic-market-data`'s `FlexibleDate` instead of the CLI's own; the error message reads `Invalid date: '15/01/2025'; expected YYYY-MM-DD, YYYY/MM/DD or YYYYMMDD`
 
 ## [0.7.0] - 2026-10-02
