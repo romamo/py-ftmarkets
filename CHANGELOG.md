@@ -15,6 +15,8 @@ All notable changes to this project will be documented in this file.
 - **BREAKING: `FTDataSource.validate()` and `resolve()` reject a target price of 0 or less** with `ValueError` before fetching anything; `pydantic-market-data`'s `Price` accepts any float (#9)
 - **`FTDataSource.history(period=HistoryPeriod.D1)`** fetches 5 calendar days and returns only the latest candle, so it has a candle on a Monday or after a holiday (#9)
 - **`FTDataSource`** takes an optional `today` callable (default `date.today`) that `history(period=HistoryPeriod.YTD)` counts from (#9)
+- **BREAKING: CLI `lookup --price`** no longer treats a scraper or HTTP error during a candidate's price check as "no match": only a failed price check skips the candidate, and any other error stops the command with a treaty error (`HANDLER_CRASHED`, exit 1) instead of answering `NOT_FOUND` or a shorter list (#10)
+- **BREAKING: `Scraper.get_history()` raises `ScraperError` on a malformed chart response**: dates without a price element, a missing Open/High/Low/Close series, any series whose length differs from the dates, values without dates, and a body that is not JSON or does not fit `ChartResponse` (which used to raise `ValidationError` or `JSONDecodeError`). It used to return an empty `History` or pad the candles with `None`. A response with an empty `Dates` list is "no data" and still gives an empty `History` (the CLI's `NOT_FOUND`); a missing volume element still leaves `volume` empty (#10)
 
 ### Fixed
 - **`search()` crashed on 12-character non-ISIN queries** such as `AMAZONCOMINC`, which were taken for ISINs and failed `Security` validation; they now leave `isin` unset (#7)

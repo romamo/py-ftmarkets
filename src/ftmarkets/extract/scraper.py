@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from lxml import html
 from lxml.html import HtmlElement
+from pydantic import ValidationError
 from pydantic_extra_types.country import CountryAlpha2
 from pydantic_extra_types.currency_code import Currency
 from pydantic_market_data.models import ISIN, OHLCV, AssetClass, History, Security, validate_isin
@@ -19,6 +20,7 @@ from .schemas import (
     ChartRequestElement,
     ChartResponse,
     ComponentSeries,
+    ComponentSeriesType,
     DataPeriod,
     Symbol,
     Xid,
@@ -256,8 +258,10 @@ class Scraper:
                 logger.debug("HTTP 400 Error for /data/chartapi/series: %s", resp.text)
             raise e
 
-        # Parse with Pydantic
-        chart_data = ChartResponse(**resp.json())
+        try:
+            chart_data = ChartResponse(**resp.json())
+        except (requests.exceptions.JSONDecodeError, ValidationError) as e:
+            raise ScraperError(f"Malformed chart response for {symbol_val.root}: {e}") from e
 
         return self._convert_to_history(symbol_val, chart_data)
 
@@ -312,49 +316,70 @@ class Scraper:
     def _convert_to_history(self, symbol: Symbol, data: ChartResponse) -> History:
         """
         Convert strictly typed API response to pydantic-market-data History.
-        """
-        ranges = []
 
-        # Find Price and Volume elements
+        An empty ``Dates`` list is FT's "no data" answer and gives an empty History, as
+        long as no series carries values. With dates, the price element must hold Open,
+        High, Low, and Close series of exactly one value per date; the volume element
+        may be missing (volume is then None), but a Volume series present must match the
+        dates too. Anything else raises ScraperError.
+        """
+        security = Security(symbol=symbol, name=symbol.root)
+        count = len(data.dates)
+
         price_el = next((e for e in data.elements if e.type == ChartElementType.PRICE), None)
         vol_el = next((e for e in data.elements if e.type == ChartElementType.VOLUME), None)
 
-        if not price_el:
-            return History(security=Security(symbol=symbol, name=symbol.root), candles=[])
-
-        # Extract series
-        # Helper to get values list safely
-        def get_values(series_list: list[ComponentSeries], type_name: str) -> list[float]:
-            found = next((s for s in series_list if s.type == type_name), None)
-            return found.values if found else []
-
-        highs = get_values(price_el.component_series, "High")
-        lows = get_values(price_el.component_series, "Low")
-        opens = get_values(price_el.component_series, "Open")
-        closes = get_values(price_el.component_series, "Close")
-        vols = get_values(vol_el.component_series, "Volume") if vol_el else []
-
-        for i, dt in enumerate(data.dates):
-            c_open = opens[i] if i < len(opens) else None
-            c_high = highs[i] if i < len(highs) else None
-            c_low = lows[i] if i < len(lows) else None
-            c_close = closes[i] if i < len(closes) else None
-            c_vol = vols[i] if i < len(vols) else None
-
-            # Pydantic-market-data expects datetime (naive or aware)
-            # data.dates are strictly typed datetime from CheckRequest
-            ranges.append(
-                OHLCV(
-                    date=dt,
-                    open=c_open,
-                    high=c_high,
-                    low=c_low,
-                    close=c_close,
-                    volume=c_vol,
+        def values(
+            series_list: list[ComponentSeries], kind: ComponentSeriesType
+        ) -> list[float] | None:
+            found = next((s for s in series_list if s.type == kind), None)
+            if found is None:
+                return None
+            if len(found.values) != count:
+                raise ScraperError(
+                    f"Chart response for {symbol.root} has {len(found.values)} {kind.value} "
+                    f"values for {count} dates"
                 )
-            )
+            return found.values
 
-        return History(security=Security(symbol=symbol, name=symbol.root), candles=ranges)
+        if price_el is None:
+            if count:
+                raise ScraperError(
+                    f"Chart response for {symbol.root} has {count} dates but no price element"
+                )
+            if vol_el is not None:
+                values(vol_el.component_series, ComponentSeriesType.VOLUME)
+            return History(security=security, candles=[])
+
+        ohlc: dict[ComponentSeriesType, list[float]] = {}
+        for kind in (
+            ComponentSeriesType.OPEN,
+            ComponentSeriesType.HIGH,
+            ComponentSeriesType.LOW,
+            ComponentSeriesType.CLOSE,
+        ):
+            found = values(price_el.component_series, kind)
+            if found is None:
+                if count:
+                    raise ScraperError(
+                        f"Chart response for {symbol.root} has no {kind.value} series"
+                    )
+                found = []
+            ohlc[kind] = found
+        vols = values(vol_el.component_series, ComponentSeriesType.VOLUME) if vol_el else None
+
+        candles = [
+            OHLCV(
+                date=dt,
+                open=ohlc[ComponentSeriesType.OPEN][i],
+                high=ohlc[ComponentSeriesType.HIGH][i],
+                low=ohlc[ComponentSeriesType.LOW][i],
+                close=ohlc[ComponentSeriesType.CLOSE][i],
+                volume=vols[i] if vols is not None else None,
+            )
+            for i, dt in enumerate(data.dates)
+        ]
+        return History(security=security, candles=candles)
 
     # --- Helpers ---
 

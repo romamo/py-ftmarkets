@@ -8,7 +8,6 @@ every command in-process through ``App.call`` against a fake source.
 from datetime import date
 from importlib.metadata import version
 
-import requests
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic_market_data.cli_models import HistoryQueryArgs, SecurityQueryArgs
 from pydantic_market_data.interfaces import DataSource
@@ -24,7 +23,6 @@ from pydantic_market_data.models import (
 from treaty import App, Ctx, Exit, Page, ParseError, RequiresAny
 
 from .api import FTDataSource
-from .extract.scraper import ScraperError
 
 # FlexibleDate validates the format; the field is re-declared only so --help names it
 _DATE_FORMATS = "YYYY-MM-DD, YYYY/MM/DD, or YYYYMMDD"
@@ -98,15 +96,15 @@ def _matches(security: Security, args: LookupArgs) -> bool:
 def _price_matches(
     source: DataSource, security: Security, on: date, price: Price, ctx: Ctx
 ) -> bool:
-    symbol = str(security.symbol)
+    """Whether ``security`` traded near ``price`` on ``on``
+
+    Only a failed price check means "no match"; scraper and HTTP errors propagate, so
+    treaty reports them instead of the scan reading them as a mismatch.
+    """
     try:
         return source.validate(security.symbol, on, price)
     except PriceVerificationError as exc:
-        ctx.log("price check failed", symbol=symbol, reason=str(exc))
-    except ScraperError as exc:
-        ctx.debug("scraper error during price check", symbol=symbol, reason=str(exc))
-    except requests.exceptions.HTTPError as exc:
-        ctx.debug("HTTP error during price check", symbol=symbol, reason=str(exc))
+        ctx.log("price check failed", symbol=str(security.symbol), reason=str(exc))
     return False
 
 

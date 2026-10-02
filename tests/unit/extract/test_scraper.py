@@ -323,11 +323,3 @@ def test_http_400_errors(scraper, mock_client):
         # We need a valid XID to bypass get_xid, so we patch get_xid
         scraper.get_xid = MagicMock(return_value=Xid(root="123"))
         scraper.get_history(Symbol(root="AAPL"), 10)
-
-
-def test_get_history_missing_elements(scraper, mock_client):
-    scraper.get_xid = MagicMock(return_value=Xid(root="123"))
-    chart_json = {"Dates": ["2023-01-01T00:00:00"], "Elements": []}
-    mock_client.post.return_value = MagicMock(status_code=200, json=lambda: chart_json)
-    hist = scraper.get_history(Symbol(root="AAPL"), 10)
-    assert len(hist.candles) == 0
