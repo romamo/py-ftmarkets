@@ -38,7 +38,7 @@ uv run ftmarkets --help        # run CLI
 
 ## Testing
 
-- `tests/unit/`: offline tests; the default `uv run pytest` runs them. Fakes are injected through constructors (`Scraper(http_client=...)`, `FTDataSource(scraper_instance=...)`), never patched in. `test_readme.py` runs the README's Python example against a fake scraper
+- `tests/unit/`: offline tests; the default `uv run pytest` runs them. Fakes are injected through constructors (`Scraper(http_client=...)`, `FTDataSource(scraper_instance=...)`), never patched in; no `MagicMock` or `monkeypatch`. `conftest.py`'s `record_ft`/`serve_ft` fixtures mount a `RecordingAdapter` on a real `FTClient`'s session that answers canned FT pages (by path, with status and redirect URL) and records each request. `test_readme.py` runs the README's Python example against a fake scraper
 - `tests/unit/test_cli.py`: the treaty CLI through `App.call`; it needs Python 3.14 and the `cli` extra (`uv run -p 3.14 --extra cli pytest`) and is skipped elsewhere
 - `tests/integration/test_api_live.py`: hits live markets.ft.com, marked `live` and deselected by `addopts`; run with `uv run pytest -m live`, or the manual `Live` workflow (`.github/workflows/live.yml`). Use sparingly to avoid rate limiting
 - `tests/smoke_test.py`: an import check `publish.yml` runs against the built wheel and sdist
