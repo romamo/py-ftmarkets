@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from datetime import date, datetime
 
 from pydantic_market_data.interfaces import DataSource
@@ -23,6 +24,22 @@ logger = logging.getLogger(__name__)
 
 _PRICE_LOOKUP_WINDOW_DAYS = 5  # Covers weekends + public holidays
 
+# Calendar days fetched per period; YTD depends on today and is computed in history()
+_PERIOD_DAYS: dict[HistoryPeriod, int] = {
+    # D1 fetches a few days and keeps the last candle, so a Monday or a day after a
+    # holiday still has one
+    HistoryPeriod.D1: 5,
+    HistoryPeriod.D5: 7,
+    HistoryPeriod.MO1: 30,
+    HistoryPeriod.MO3: 90,
+    HistoryPeriod.MO6: 180,
+    HistoryPeriod.Y1: 365,
+    HistoryPeriod.Y2: 365 * 2,
+    HistoryPeriod.Y5: 365 * 5,
+    HistoryPeriod.Y10: 365 * 10,
+    HistoryPeriod.MAX: 365 * 20,
+}
+
 
 class FTDataSource(DataSource):
     """
@@ -30,8 +47,13 @@ class FTDataSource(DataSource):
     Delegates to strict Scraper.
     """
 
-    def __init__(self, scraper_instance: Scraper | None = None):
+    def __init__(
+        self,
+        scraper_instance: Scraper | None = None,
+        today: Callable[[], date] = date.today,
+    ):
         self.scraper = scraper_instance or scraper
+        self.today = today
 
     def search(self, query: str) -> list[Security]:
         return self.scraper.search(query)
@@ -55,26 +77,12 @@ class FTDataSource(DataSource):
         if not candidates:
             return None
 
-        # Asset Class Filtering (Strict)
-        asset_class = getattr(criteria, "asset_class", None)
-        if asset_class:
-            ac_raw = str(asset_class).upper()
-            target_ac = None
-            if "STOCK" in ac_raw or "EQUITY" in ac_raw:
-                target_ac = "EQUITY"
-            elif "ETF" in ac_raw:
-                target_ac = "ETF"
-            elif "INDEX" in ac_raw:
-                target_ac = "INDEX"
-            elif "FUND" in ac_raw:
-                target_ac = "FUND"
-            else:
-                # Unrecognizable class provided, must fail as requested.
-                return None
+        if criteria.asset_class is not None:
+            candidates = [c for c in candidates if c.asset_class == criteria.asset_class]
 
-            candidates = [
-                c for c in candidates if c.asset_class and target_ac in c.asset_class.upper()
-            ]
+        if criteria.exchange:
+            wanted = criteria.exchange.lower()
+            candidates = [c for c in candidates if c.exchange and wanted in c.exchange.lower()]
 
         if not candidates:
             return None
@@ -104,22 +112,19 @@ class FTDataSource(DataSource):
             targets = [
                 (
                     self._ensure_datetime(point.date),
-                    Price(root=float(point.price))
-                    if isinstance(point.price, (int, float))
-                    else point.price,
+                    self._positive_price(point.price),
                 )
                 for point in criteria.price_on
             ]
             days = self._get_required_history_days(min(dt for dt, _ in targets))
 
             for cand in filtered:
+                hist = self.scraper.get_history(cand.symbol, days=days)
                 try:
-                    hist = self.scraper.get_history(cand.symbol, days=days)
                     if all(self._check_price_match(hist, dt, pr) for dt, pr in targets):
                         return cand
-                except (PriceVerificationError, Exception) as e:
+                except PriceVerificationError as e:
                     logger.debug("Candidate %s failed validation: %s", cand.symbol, e)
-                    continue
 
             return None
 
@@ -146,22 +151,17 @@ class FTDataSource(DataSource):
 
     def history(self, symbol: Symbol.Input, period: HistoryPeriod = HistoryPeriod.MO1) -> History:
         symbol_val = Symbol(root=symbol) if isinstance(symbol, str) else symbol
-        # Convert period string to days
-        days_map = {
-            HistoryPeriod.D1: 2,
-            HistoryPeriod.D5: 7,
-            HistoryPeriod.MO1: 30,
-            HistoryPeriod.MO3: 90,
-            HistoryPeriod.MO6: 180,
-            HistoryPeriod.Y1: 365,
-            HistoryPeriod.Y2: 365 * 2,
-            HistoryPeriod.Y5: 365 * 5,
-            HistoryPeriod.Y10: 365 * 10,
-            HistoryPeriod.MAX: 365 * 20,
-        }
-
-        days = days_map.get(period, 30)
-        return self.scraper.get_history(symbol_val, days=days)
+        if period == HistoryPeriod.YTD:
+            today = self.today()
+            # Days since 1 January, counting today
+            days = (today - date(today.year, 1, 1)).days + 1
+        else:
+            days = _PERIOD_DAYS[period]
+        hist = self.scraper.get_history(symbol_val, days=days)
+        if period == HistoryPeriod.D1:
+            latest = sorted(hist.candles, key=lambda c: c.date)[-1:]
+            return History(security=hist.security, candles=latest)
+        return hist
 
     def validate(
         self,
@@ -174,10 +174,7 @@ class FTDataSource(DataSource):
         Validates if the symbol traded near the target price on the target date.
         """
         symbol_val = Symbol(root=symbol) if isinstance(symbol, str) else symbol
-        if isinstance(target_price, (int, float)):
-            price_val = Price(root=float(target_price))
-        else:
-            price_val = target_price
+        price_val = self._positive_price(target_price)
 
         target_dt = self._ensure_datetime(target_date)
         days = self._get_required_history_days(target_dt)
@@ -186,6 +183,14 @@ class FTDataSource(DataSource):
         return self._check_price_match(hist, target_dt, price_val, price_tolerance)
 
     # --- Internal Helpers ---
+
+    @staticmethod
+    def _positive_price(price: Price.Input) -> Price:
+        """``price`` as a Price; a price check against zero or less is meaningless"""
+        price_val = Price(root=float(price)) if isinstance(price, (int, float)) else price
+        if price_val.root <= 0:
+            raise ValueError(f"target price must be greater than 0, got {price_val.root}")
+        return price_val
 
     def _ensure_datetime(self, date_input: StrictDate.Input | None = None) -> datetime:
         if date_input is None:
