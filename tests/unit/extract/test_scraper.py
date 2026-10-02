@@ -1,50 +1,58 @@
-from unittest.mock import MagicMock
+"""Scraper against canned FT pages, served to a real FTClient through RecordingAdapter"""
+
+import json
 
 import pytest
+import requests
+from conftest import Reply
 from pydantic_market_data.models import AssetClass, Security
 
 from ftmarkets.client import FTClient
 from ftmarkets.extract.schemas import Symbol
-from ftmarkets.extract.scraper import Scraper, Xid
+from ftmarkets.extract.scraper import Scraper, ScraperError, Xid
+
+SEARCH = "/data/search"
+TEARSHEET_PATH = "/data/equities/tearsheet/summary"
+CHART = "/data/chartapi/series"
+TEARSHEET = b'<html><body><div data-mod-config=\'{"xid":"123"}\'></div></body></html>'
 
 
 @pytest.fixture
-def mock_client():
-    mock = MagicMock(spec=FTClient)
-    # Mock responses
-    mock.get.return_value = MagicMock(status_code=200, content=b"<html></html>", text="")
-    mock.post.return_value = MagicMock(status_code=200, json=lambda: {})
-    return mock
+def client() -> FTClient:
+    return FTClient()
 
 
 @pytest.fixture
-def scraper(mock_client):
-    return Scraper(http_client=mock_client)
+def scraper(client) -> Scraper:
+    return Scraper(http_client=client)
 
 
-def test_get_xid_extraction(scraper, mock_client):
-    # Setup mock HTML with xid in data-mod-config
-    html_content = """
+def _posted(sent) -> list[dict]:
+    return [json.loads(s.body) for s in sent if s.method == "POST"]
+
+
+def test_get_xid_extraction(scraper, client, serve_ft):
+    html_content = b"""
     <html>
         <body>
             <div data-mod-config='{"xid":"123456", "symbol":"TEST"}'></div>
         </body>
     </html>
     """
-    mock_client.get.return_value = MagicMock(
-        status_code=200, content=html_content.encode(), text=html_content
-    )
+    adapter = serve_ft(client, {TEARSHEET_PATH: Reply(html_content)})
 
     xid = scraper.get_xid(Symbol(root="TEST:EX"))
 
     assert isinstance(xid, Xid)
     assert xid.root == "123456"
     assert str(xid) == "123456"
-    mock_client.get.assert_called_with("/data/equities/tearsheet/summary", params={"s": "TEST:EX"})
+    assert [s.url for s in adapter.sent] == [
+        "https://markets.ft.com/data/equities/tearsheet/summary?s=TEST%3AEX"
+    ]
 
 
-def test_get_xid_json_error_fallback(scraper, mock_client):
-    html_content = """
+def test_get_xid_json_error_fallback(scraper, client, serve_ft):
+    html_content = b"""
     <html>
         <body>
             <div data-mod-config='invalid_json_here'></div>
@@ -53,33 +61,25 @@ def test_get_xid_json_error_fallback(scraper, mock_client):
         </body>
     </html>
     """
-    mock_client.get.return_value = MagicMock(
-        status_code=200, content=html_content.encode(), text=html_content
-    )
+    serve_ft(client, {TEARSHEET_PATH: Reply(html_content)})
     assert scraper.get_xid(Symbol(root="TEST")).root == "987654"
 
 
-def test_get_xid_regex_fallback(scraper, mock_client):
-    # Setup mock HTML with xid in script or other text
-    html_content = """
+def test_get_xid_regex_fallback(scraper, client, serve_ft):
+    html_content = b"""
     <html>
         <script>
             var config = { xid: "987654" };
         </script>
     </html>
     """
-    mock_client.get.return_value = MagicMock(
-        status_code=200, content=html_content.encode(), text=html_content
-    )
+    serve_ft(client, {TEARSHEET_PATH: Reply(html_content)})
 
-    xid = scraper.get_xid(Symbol(root="TEST:REGEX"))
-
-    assert xid.root == "987654"
+    assert scraper.get_xid(Symbol(root="TEST:REGEX")).root == "987654"
 
 
-def test_search_parsing(scraper, mock_client):
-    # Mock search results HTML
-    html_content = """
+def test_search_parsing(scraper, client, serve_ft):
+    html_content = b"""
     <html>
         <div id="equity-panel" role="tabpanel">
             <table class="mod-ui-table">
@@ -95,11 +95,7 @@ def test_search_parsing(scraper, mock_client):
         </div>
     </html>
     """
-    mock_client.get.return_value = MagicMock(
-        status_code=200,
-        content=html_content.encode(),
-        url="https://markets.ft.com/data/search?query=AAPL",
-    )
+    serve_ft(client, {SEARCH: Reply(html_content)})
 
     results = scraper.search("AAPL")
 
@@ -113,13 +109,8 @@ def test_search_parsing(scraper, mock_client):
     assert sec.security_type == "Equity"
 
 
-def test_get_history(scraper, mock_client):
-    # 1. Mock get_xid call
-    # We can rely on internal logic or just mock get_xid if we want unit test isolation
-    # But since Scraper calls get_xid internally, let's mock the network call for xid first
-    xid_html = """<div data-mod-config='{"xid":"111222"}'></div>"""
-
-    # 2. Mock chart response
+def test_get_history(scraper, client, serve_ft):
+    xid_html = b"""<div data-mod-config='{"xid":"111222"}'></div>"""
     chart_json = {
         "Dates": ["2023-01-01T00:00:00"],
         "Elements": [
@@ -140,15 +131,9 @@ def test_get_history(scraper, mock_client):
             },
         ],
     }
-
-    # Side effect for get/post to return different things
-    # get -> xid page, post -> chart data
-    def side_effect(*args, **kwargs):
-        return MagicMock(status_code=200, json=lambda: chart_json)
-
-    mock_client.post.side_effect = side_effect
-    mock_client.get.return_value = MagicMock(
-        status_code=200, content=xid_html.encode(), text=xid_html
+    adapter = serve_ft(
+        client,
+        {TEARSHEET_PATH: Reply(xid_html), CHART: Reply(json.dumps(chart_json).encode())},
     )
 
     hist = scraper.get_history(Symbol(root="AAPL:NSQ"), days=10)
@@ -158,26 +143,27 @@ def test_get_history(scraper, mock_client):
     assert candle.close == 105.0
     assert candle.volume == 5000
 
-    # Verify strict request payload
-    calls = mock_client.post.call_args_list
-    assert len(calls) == 1
-    payload = calls[0].kwargs["json"]
-    assert payload["days"] == 10
-    assert payload["elements"][0]["Symbol"] == "111222"
+    # The chart request carries the XID read off the tearsheet and the requested days
+    posted = _posted(adapter.sent)
+    assert len(posted) == 1
+    assert posted[0]["days"] == 10
+    assert posted[0]["elements"][0]["Symbol"] == "111222"
 
 
-def test_search_tearsheet_redirect(scraper, mock_client):
-    # Mock redirect to tearsheet
-    html_content = """
-    <html>
-        <h1 class="mod-tearsheet-overview__header__name">Apple Inc</h1>
-        <table><tr><th>ISIN</th><td>US0378331005</td></tr></table>
-    </html>
-    """
-    mock_url = "https://markets.ft.com/data/equities/tearsheet/summary?s=AAPL:NSQ"
-    mock_client.get.return_value = MagicMock(
-        status_code=200, content=html_content.encode(), url=mock_url, text=html_content
-    )
+TEARSHEET_PAGE = b"""
+<html>
+    <h1 class="mod-tearsheet-overview__header__name">Apple Inc</h1>
+    <table><tr><th>ISIN</th><td>US0378331005</td></tr></table>
+</html>
+"""
+
+
+def _redirected_to(kind: str, query: str = "?s=AAPL:NSQ") -> Reply:
+    return Reply(TEARSHEET_PAGE, url=f"https://markets.ft.com/data/{kind}/tearsheet/summary{query}")
+
+
+def test_search_tearsheet_redirect(scraper, client, serve_ft):
+    serve_ft(client, {SEARCH: _redirected_to("equities")})
 
     results = scraper.search("US0378331005")
 
@@ -187,65 +173,56 @@ def test_search_tearsheet_redirect(scraper, mock_client):
     assert results[0].asset_class == AssetClass.EQUITY
     assert results[0].security_type == "Equity"
 
-    # Test other asset class redirects
-    mock_client.get.return_value.url = (
-        "https://markets.ft.com/data/etfs/tearsheet/summary?s=AAPL:NSQ"
-    )
-    etf = scraper.search("US0378331005")[0]
-    assert (etf.asset_class, etf.security_type) == (AssetClass.EQUITY, "ETF")
 
-    mock_client.get.return_value.url = (
-        "https://markets.ft.com/data/funds/tearsheet/summary?s=AAPL:NSQ"
-    )
-    fund = scraper.search("US0378331005")[0]
-    assert (fund.asset_class, fund.security_type) == (None, "Fund")
+@pytest.mark.parametrize(
+    ("kind", "asset_class", "security_type"),
+    [
+        ("etfs", AssetClass.EQUITY, "ETF"),
+        ("funds", None, "Fund"),
+        ("indices", AssetClass.INDEX, "Index"),
+    ],
+)
+def test_search_tearsheet_redirect_asset_classes(
+    scraper, client, serve_ft, kind, asset_class, security_type
+):
+    serve_ft(client, {SEARCH: _redirected_to(kind)})
+    sec = scraper.search("US0378331005")[0]
+    assert (sec.asset_class, sec.security_type) == (asset_class, security_type)
 
-    mock_client.get.return_value.url = (
-        "https://markets.ft.com/data/indices/tearsheet/summary?s=AAPL:NSQ"
-    )
-    index = scraper.search("US0378331005")[0]
-    assert (index.asset_class, index.security_type) == (AssetClass.INDEX, "Index")
 
-    # Test no symbol code
-    mock_client.get.return_value.url = "https://markets.ft.com/data/equities/tearsheet/summary"
-    assert len(scraper.search("US0378331005")) == 0
+def test_search_tearsheet_redirect_without_symbol_is_empty(scraper, client, serve_ft):
+    serve_ft(client, {SEARCH: _redirected_to("equities", query="")})
+    assert scraper.search("US0378331005") == []
 
-    # Test missing ISIN
-    html_content_no_isin = """
+
+def test_search_tearsheet_redirect_without_isin(scraper, client, serve_ft):
+    page = b"""
     <html>
         <h1 class="mod-tearsheet-overview__header__name">Apple Inc</h1>
         <table><tr><th>Some Other Th</th><td>123</td></tr></table>
     </html>
     """
-    mock_client.get.return_value = MagicMock(
-        status_code=200,
-        content=html_content_no_isin.encode(),
-        url="https://markets.ft.com/data/equities/tearsheet/summary?s=AAPL:NSQ",
-    )
+    url = "https://markets.ft.com/data/equities/tearsheet/summary?s=AAPL:NSQ"
+    serve_ft(client, {SEARCH: Reply(page, url=url)})
     assert len(scraper.search("AAPL")) == 1
 
 
-def test_get_xid_fails(scraper, mock_client):
-    from ftmarkets.extract.scraper import ScraperError
-
-    mock_client.get.return_value = MagicMock(
-        status_code=200, content=b"no xid here", text="no xid here"
-    )
+def test_get_xid_fails(scraper, client, serve_ft):
+    serve_ft(client, {TEARSHEET_PATH: Reply(b"no xid here")})
 
     with pytest.raises(ScraperError, match="Could not determine internal FT ID"):
         scraper.get_xid(Symbol(root="UNKNOWN"))
 
 
 def test_extract_currency_strict(scraper):
-
     curr = scraper._extract_currency("TICKER:EXCHANGE:USD")
     assert str(curr) == "USD"
 
     assert scraper._extract_currency("INVALID") is None
 
 
-def test_search_parsing_funds_and_etfs(scraper, mock_client):
-    html_content = """
+def test_search_parsing_funds_and_etfs(scraper, client, serve_ft):
+    html_content = b"""
     <html>
         <div id="fund-panel" role="tabpanel">
             <table class="mod-ui-table">
@@ -272,11 +249,7 @@ def test_search_parsing_funds_and_etfs(scraper, mock_client):
         <a href="/funds/tearsheet/summary?s=FUND2:EX">Fund 2 Link</a>
     </html>
     """
-    mock_client.get.return_value = MagicMock(
-        status_code=200,
-        content=html_content.encode(),
-        url="https://markets.ft.com/data/search?query=TEST",
-    )
+    serve_ft(client, {SEARCH: Reply(html_content)})
     results = scraper.search("TEST")
 
     assert len(results) == 4
@@ -312,42 +285,18 @@ def test_map_country_to_code(scraper):
     assert scraper._map_country_to_code(None) is None
 
 
-def test_http_400_errors(scraper, mock_client):
-    import requests
-
-    mock_resp = MagicMock()
-    mock_resp.status_code = 400
-    mock_resp.text = "Error 400"
-    mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError()
-
-    mock_client.get.return_value = mock_resp
+def test_http_400_errors(scraper, client, serve_ft):
+    serve_ft(client, {SEARCH: Reply(b"Error 400", 400), TEARSHEET_PATH: Reply(b"Error 400", 400)})
     with pytest.raises(requests.exceptions.HTTPError):
         scraper.search("AAPL")
 
     with pytest.raises(requests.exceptions.HTTPError):
         scraper.get_xid(Symbol(root="AAPL"))
 
-    client = TearsheetClient(chart=mock_resp)
+
+def test_http_400_from_chart_api(scraper, client, serve_ft):
+    adapter = serve_ft(client, {TEARSHEET_PATH: Reply(TEARSHEET), CHART: Reply(b"Error 400", 400)})
     with pytest.raises(requests.exceptions.HTTPError):
-        Scraper(http_client=client).get_history(Symbol(root="AAPL"), 10)
-    # get_xid read XID 123 off the fake tearsheet before the chart API answered 400
-    assert [e["Symbol"] for e in client.posted[0]["elements"]] == ["123", "123"]
-
-
-TEARSHEET = '<html><body><div data-mod-config=\'{"xid":"123"}\'></div></body></html>'
-
-
-class TearsheetClient:
-    """A fake FTClient: every GET answers FT's tearsheet page for XID 123, so get_xid
-    finds it, and every POST to the chart API answers ``chart``"""
-
-    def __init__(self, chart: MagicMock):
-        self.chart = chart
-        self.posted: list[dict] = []
-
-    def get(self, path: str, params: dict | None = None, **kwargs) -> MagicMock:
-        return MagicMock(status_code=200, content=TEARSHEET.encode(), text=TEARSHEET)
-
-    def post(self, path: str, json: dict | None = None, **kwargs) -> MagicMock:
-        self.posted.append(json or {})
-        return self.chart
+        scraper.get_history(Symbol(root="AAPL"), 10)
+    # get_xid read XID 123 off the tearsheet before the chart API answered 400
+    assert [e["Symbol"] for e in _posted(adapter.sent)[0]["elements"]] == ["123", "123"]

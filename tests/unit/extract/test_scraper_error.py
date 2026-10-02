@@ -1,46 +1,34 @@
-from unittest.mock import MagicMock
+"""HTTP errors from FT propagate out of Scraper; served to a real FTClient through
+RecordingAdapter"""
 
 import pytest
 import requests
+from conftest import Reply
 
 from ftmarkets.client import FTClient
 from ftmarkets.extract.scraper import Scraper
 
 
-@pytest.fixture
-def mock_client():
-    mock = MagicMock(spec=FTClient)
-    return mock
-
-
-@pytest.fixture
-def scraper(mock_client):
-    return Scraper(http_client=mock_client)
-
-
-def test_search_http_error_handling(scraper, mock_client):
-    # Mock response that raises HTTPError
-    mock_resp = MagicMock()
-    mock_resp.status_code = 500
-    mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("Internal Server Error")
-    mock_client.get.return_value = mock_resp
+def test_search_http_error_handling(serve_ft):
+    client = FTClient()
+    serve_ft(client, {"/data/search": Reply(b"Internal Server Error", 500)})
 
     with pytest.raises(requests.exceptions.HTTPError):
-        scraper.search("TEST")
+        Scraper(http_client=client).search("TEST")
 
 
-def test_get_history_http_error_handling(scraper, mock_client):
-    # Mock get_xid success then chart API failure
-    xid_html = """<div data-mod-config='{"xid":"111222"}'></div>"""
-    mock_client.get.return_value = MagicMock(
-        status_code=200, content=xid_html.encode(), text=xid_html
+def test_get_history_http_error_handling(serve_ft):
+    # get_xid succeeds, then the chart API fails
+    client = FTClient()
+    serve_ft(
+        client,
+        {
+            "/data/equities/tearsheet/summary": Reply(
+                b"""<div data-mod-config='{"xid":"111222"}'></div>"""
+            ),
+            "/data/chartapi/series": Reply(b"Bad Request", 400),
+        },
     )
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 400
-    mock_resp.text = "Bad Request"
-    mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("Bad Request")
-    mock_client.post.return_value = mock_resp
-
     with pytest.raises(requests.exceptions.HTTPError):
-        scraper.get_history("AAPL:NSQ")
+        Scraper(http_client=client).get_history("AAPL:NSQ")
