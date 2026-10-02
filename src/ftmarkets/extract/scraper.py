@@ -269,10 +269,10 @@ class Scraper:
         """
         Extract internal XID for a ticker.
         """
-        url_summary = f"/data/equities/tearsheet/summary?s={symbol.root}"
+        url_summary = "/data/equities/tearsheet/summary"
         # Note: Valid for Equities/ETFs/Indices usually, if not we might need adaptive URLs
         # But commonly ?s=TICKER works for lookup or redirects
-        resp = self.client.get(url_summary)
+        resp = self.client.get(url_summary, params={"s": symbol.root})
         try:
             resp.raise_for_status()
         except requests.exceptions.HTTPError as e:
