@@ -7,10 +7,13 @@ CA bundle reach FT's ``requests.Session``, and tests run every command in-proces
 ``App.call`` against a fake source.
 """
 
-from collections.abc import Callable
-from datetime import date
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from datetime import date, datetime, timezone
+from email.utils import parsedate_to_datetime
 from importlib.metadata import version
 
+import requests
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic_market_data.cli_models import HistoryQueryArgs, SecurityQueryArgs
 from pydantic_market_data.interfaces import DataSource
@@ -23,11 +26,11 @@ from pydantic_market_data.models import (
     Security,
     SecurityQuery,
 )
-from treaty import App, Ctx, Exit, NetworkSettings, Page, ParseError, RequiresAny
+from treaty import App, CliExit, Ctx, Exit, NetworkSettings, Page, ParseError, RequiresAny
 
 from .api import FTDataSource
 from .client import FTClient
-from .extract.scraper import Scraper
+from .extract.scraper import Scraper, ScraperError
 
 # FlexibleDate validates the format; the field is re-declared only so --help names it
 _DATE_FORMATS = "YYYY-MM-DD, YYYY/MM/DD, or YYYYMMDD"
@@ -209,11 +212,143 @@ def run_history(source: DataSource, args: HistoryArgs, ctx: Ctx) -> HistoryResul
     return HistoryResult(security=security, history=history, validated=validated)
 
 
+_ISSUES = "https://github.com/romamo/py-ftmarkets/issues"
+_REPORT = f"report it at {_ISSUES} with the command and the symbol"
+_RATE_LIMIT_WAIT_MS = 30_000
+"""The wait a 429 without a readable ``Retry-After`` asks for; FTClient already retried"""
+
+
+def _retry_after_ms(raw: str | None) -> int | None:
+    """``Retry-After`` in milliseconds, from delay seconds or an HTTP date; None when absent
+    or unreadable"""
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if raw.isascii() and raw.isdigit():
+        return int(raw) * 1000
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0, int((when - datetime.now(timezone.utc)).total_seconds() * 1000))
+
+
+def _status_exit(exc: requests.HTTPError, context: dict[str, object]) -> CliExit | None:
+    """The exit for FT's error status; None when ``exc`` carries no response"""
+    response = exc.response
+    if response is None:
+        return None
+    status = response.status_code
+    context = {**context, "status_code": status}
+    wait = _retry_after_ms(response.headers.get("Retry-After"))
+    if status == 429:
+        return Exit.RATE_LIMITED(
+            "FT is rate limiting requests (HTTP 429).",
+            code="RATE_LIMITED",
+            detail=str(exc),
+            context=context,
+            retry_after_ms=_RATE_LIMIT_WAIT_MS if wait is None else wait,
+            suggestion="wait error.retry_after_ms, then retry the same command",
+        )
+    if status >= 500:
+        return Exit.UNAVAILABLE(
+            f"FT answered HTTP {status}.",
+            code="UPSTREAM_UNAVAILABLE",
+            detail=str(exc),
+            context=context,
+            retry_after_ms=wait,
+            suggestion="FT is having trouble; retry the same command with exponential back-off",
+        )
+    # A 4xx other than 429 refuses the request ftmarkets built: FT changed the URL or the
+    # chart API it scrapes, or blocks this network; retrying the same request cannot help
+    return Exit.UPSTREAM_CHANGED(
+        f"FT refused the request (HTTP {status}).",
+        code="UPSTREAM_REJECTED",
+        detail=str(exc),
+        context=context,
+        suggestion=f"FT may have changed its site or be blocking this network or proxy; "
+        f"if markets.ft.com opens in a browser from here, {_REPORT}",
+    )
+
+
+@contextmanager
+def ft_failures(context: Mapping[str, object]) -> Iterator[None]:
+    """Answers FT's failures with declared exit codes instead of ``HANDLER_CRASHED``
+
+    Only these types are mapped; anything else, a programming error included, propagates.
+    Transport failures (no connection, a timeout, FT's 5xx) are ``UNAVAILABLE`` and a 429 is
+    ``RATE_LIMITED``, both retryable; a ``ScraperError`` or a 4xx is ``UPSTREAM_CHANGED``, and
+    a TLS failure ``PRECONDITION``, neither retryable.
+    """
+    known = {key: value for key, value in context.items() if value is not None}
+    try:
+        yield
+    except ScraperError as exc:
+        raise Exit.UPSTREAM_CHANGED(
+            "FT answered in a shape ftmarkets cannot read.",
+            code="FT_PAGE_CHANGED",
+            detail=str(exc),
+            context=known,
+            suggestion=f"FT likely changed its page or chart data; {_REPORT}",
+        ) from exc
+    except requests.HTTPError as exc:
+        mapped = _status_exit(exc, _with_url(known, exc))
+        if mapped is None:
+            raise
+        raise mapped from exc
+    except requests.exceptions.SSLError as exc:
+        raise Exit.PRECONDITION(
+            "The TLS connection to FT failed.",
+            code="TLS_FAILED",
+            detail=str(exc),
+            context=_with_url(known, exc),
+            fix_required="set REQUESTS_CA_BUNDLE or SSL_CERT_FILE to the CA bundle that signed "
+            "the certificate markets.ft.com presents here, such as a proxy's",
+        ) from exc
+    except requests.Timeout as exc:
+        raise Exit.UNAVAILABLE(
+            "FT did not answer in time.",
+            code="UPSTREAM_TIMEOUT",
+            detail=str(exc),
+            context=_with_url(known, exc),
+            suggestion="retry the same command with exponential back-off",
+        ) from exc
+    except (
+        requests.ConnectionError,
+        requests.exceptions.ChunkedEncodingError,
+        requests.exceptions.RetryError,
+    ) as exc:
+        raise Exit.UNAVAILABLE(
+            "Could not reach FT.",
+            code="CONNECTION_FAILED",
+            detail=str(exc),
+            context=_with_url(known, exc),
+            suggestion="check the network or --proxy, then retry with exponential back-off",
+        ) from exc
+
+
+def _with_url(context: dict[str, object], exc: requests.RequestException) -> dict[str, object]:
+    request = exc.request
+    if request is None or request.url is None:
+        return context
+    return {**context, "url": request.url}
+
+
 def _model(cls: type) -> type[BaseModel]:
     """``cls`` as a pydantic model class; the adapters are registered for BaseModel only"""
     if not issubclass(cls, BaseModel):
         raise TypeError(f"{cls.__qualname__} is not a pydantic model")
     return cls
+
+
+_FT_EXIT_CODES = ("RATE_LIMITED", "UNAVAILABLE", "UPSTREAM_CHANGED")
+"""What ``ft_failures`` raises besides the implicit ``PRECONDITION``"""
+
+
+def _identifiers(args: LookupArgs | HistoryArgs) -> dict[str, object]:
+    return {"isin": args.isin, "symbol": args.symbol, "desc": args.desc}
 
 
 SourceFactory = Callable[[NetworkSettings], DataSource]
@@ -246,6 +381,14 @@ def create_app(source_factory: SourceFactory) -> App:
         side_effects="none",
         suggestion="check --price and --date, or drop them to fetch the history alone",
     )
+    app.exit_code(
+        "UPSTREAM_CHANGED",
+        80,
+        description="FT answered in a shape ftmarkets cannot read or refused its request (4xx)",
+        retryable=False,
+        side_effects="none",
+        suggestion=f"FT likely changed its site; {_REPORT}",
+    )
     app.args_adapter(
         BaseModel,
         schema=lambda cls: _model(cls).model_json_schema(by_alias=False),
@@ -262,7 +405,7 @@ def create_app(source_factory: SourceFactory) -> App:
         "lookup",
         description="Lookup a security by ISIN, symbol, or description, in FT's relevance order",
         danger_level="safe",
-        exit_codes=["NOT_FOUND"],
+        exit_codes=["NOT_FOUND", *_FT_EXIT_CODES],
         examples=[
             ("Look up an ISIN", "ftmarkets lookup --isin US0378331005"),
             (
@@ -286,13 +429,14 @@ def create_app(source_factory: SourceFactory) -> App:
         requires=[RequiresAny(_IDENTIFIERS)],
     )
     def lookup(args: LookupArgs, ctx: Ctx) -> Page[Security]:
-        return run_lookup(source_factory(ctx.network), args, ctx)
+        with ft_failures(_identifiers(args)):
+            return run_lookup(source_factory(ctx.network), args, ctx)
 
     @app.command(
         "history",
         description="Fetch price history for a security and optionally validate a price",
         danger_level="safe",
-        exit_codes=["NOT_FOUND", "PRICE_MISMATCH"],
+        exit_codes=["NOT_FOUND", "PRICE_MISMATCH", *_FT_EXIT_CODES],
         examples=[
             ("One month of history", "ftmarkets history --isin DE000A0S9GB0"),
             ("One year of history", "ftmarkets history --symbol AAPL:NSQ --period 1y"),
@@ -306,7 +450,8 @@ def create_app(source_factory: SourceFactory) -> App:
         requires=[RequiresAny(_IDENTIFIERS)],
     )
     def history(args: HistoryArgs, ctx: Ctx) -> HistoryResult:
-        return run_history(source_factory(ctx.network), args, ctx)
+        with ft_failures(_identifiers(args)):
+            return run_history(source_factory(ctx.network), args, ctx)
 
     return app
 
