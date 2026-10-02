@@ -62,9 +62,14 @@ class Scraper:
             return self._parse_tearsheet_as_search_result(response.url, tree, query_str)
 
         # Standard search results page
-        return self._parse_search_results(tree)
+        return self._parse_search_results(tree, self._parse_isin(query_str))
 
-    def _parse_search_results(self, tree: HtmlElement) -> list[Security]:
+    def _parse_search_results(self, tree: HtmlElement, query_isin: ISIN | None) -> list[Security]:
+        """
+        `query_isin` is the query when it is a valid ISIN: FT's results table for an
+        ISIN query lists that security's listings, so table rows carry it. Other
+        tearsheet links on the page (best matches) may be unrelated and do not.
+        """
         results: list[Security] = []
         # Mapping for FT tab IDs/names to (AssetClass, security_type)
         asset_class_map: dict[str, tuple[AssetClass | None, str | None]] = {
@@ -117,6 +122,7 @@ class Scraper:
                         country,
                         asset_class,
                         security_type,
+                        query_isin,
                     )
 
         # 2. Capture ALL tearsheet links on the page (covers "Best Match" and other lists)
@@ -143,6 +149,7 @@ class Scraper:
                     None,
                     link_asset_class,
                     link_security_type,
+                    None,
                 )
 
         return results
@@ -156,6 +163,7 @@ class Scraper:
         country: str | None,
         asset_class: AssetClass | None,
         security_type: str | None,
+        isin: ISIN | None,
     ) -> None:
         country_code = self._map_country_to_code(country)
         currency = self._extract_currency(symbol) or self._map_country_to_currency(country_code)
@@ -168,6 +176,8 @@ class Scraper:
             currency=currency,
             asset_class=asset_class,
             security_type=security_type,
+            # pmd Security validates isin with str methods, so it takes the root
+            isin=isin.root if isin else None,
         )
         results.append(sec)
 

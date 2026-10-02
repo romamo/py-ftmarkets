@@ -7,11 +7,11 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - **Dependency**: Bumped `pydantic-market-data` to `>=0.7.0`
 - **BREAKING: `SecurityQuery.price_on` dates**: `pydantic-market-data` 0.7.0 makes `FlexibleDate` accept only `YYYY-MM-DD`, `YYYY/MM/DD`, or `YYYYMMDD` strings (or `date`/`datetime` objects) and reject impossible dates, so a `SecurityQuery` (re-exported from `ftmarkets.api`) or `PriceOnDate` built from any other date string, such as `15/01/2025`, now raises `ValidationError` before it reaches `FTDataSource.resolve()`. `ftmarkets.utils.parse_date` is unchanged
-- **BREAKING: search results no longer carry the query as `isin`**: rows from FT's search-results page now have `isin=None`, since a row's ISIN is not on that page and the query was being copied onto every row, including unrelated best matches. Only an exact-match tearsheet sets `isin`: the ISIN printed on the page, or else the query when it is a valid ISIN (format and checksum) (#7)
+- **Search results set `isin` only from a valid ISIN query**: rows of FT's search-results table carry the query as `isin` only when it is a valid ISIN (format and checksum); the other tearsheet links on the page (best matches, which may be unrelated) no longer get it. An exact-match tearsheet takes the ISIN printed on the page, else the query when it is a valid ISIN (#7)
 - **`ftmarkets.extract.schemas.Isin` removed**: the scraper uses `pydantic-market-data`'s `ISIN` value object instead (#7)
 
 ### Fixed
-- **`search()` crashed on 12-character non-ISIN queries** such as `AMAZONCOMINC`, which were taken for ISINs and failed `Security` validation (#7)
+- **`search()` crashed on 12-character non-ISIN queries** such as `AMAZONCOMINC`, which were taken for ISINs and failed `Security` validation; they now leave `isin` unset (#7)
 - **Search `exchange` included FT's badge text**: `London Stock ExchangePrimary` is now `London Stock Exchange` (#7)
 - **Search results section headers and tearsheet names with child elements** no longer crash parsing (#7)
 - **A tearsheet stating an invalid ISIN** now raises `ScraperError` naming the value instead of a `Security` `ValidationError` (#7)
