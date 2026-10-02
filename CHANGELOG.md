@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.8.0] - 2026-10-02
 
 ### Added
 - **`FTClient(proxies=..., verify=...)`**: a `requests`-style proxy mapping (replacing the proxy environment variables when given, `{}` for a direct connection) and a CA bundle path; `FTClient()` and the shared `client` behave as before (#11)
