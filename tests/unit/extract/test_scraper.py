@@ -95,7 +95,11 @@ def test_search_parsing(scraper, mock_client):
         </div>
     </html>
     """
-    mock_client.get.return_value = MagicMock(status_code=200, content=html_content.encode())
+    mock_client.get.return_value = MagicMock(
+        status_code=200,
+        content=html_content.encode(),
+        url="https://markets.ft.com/data/search?query=AAPL",
+    )
 
     results = scraper.search("AAPL")
 
@@ -268,7 +272,11 @@ def test_search_parsing_funds_and_etfs(scraper, mock_client):
         <a href="/funds/tearsheet/summary?s=FUND2:EX">Fund 2 Link</a>
     </html>
     """
-    mock_client.get.return_value = MagicMock(status_code=200, content=html_content.encode())
+    mock_client.get.return_value = MagicMock(
+        status_code=200,
+        content=html_content.encode(),
+        url="https://markets.ft.com/data/search?query=TEST",
+    )
     results = scraper.search("TEST")
 
     assert len(results) == 4
