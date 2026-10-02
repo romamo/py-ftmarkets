@@ -302,7 +302,7 @@ def test_lookup_price_validation_without_a_match_is_not_found():
 def test_lookup_price_check_errors_propagate(failure):
     # A scraper or HTTP failure is an error, not "this candidate did not match"
     source = FakeSource(APPLE, matching={"APC:FRA"}, failing={"0R2V:LSE": failure})
-    envelope = create_app(source).call(
+    envelope = app_over(source).call(
         "lookup", {"isin": "US0378331005", "price": 150.0, "date": "2025-01-15", "limit": 0}
     )
     assert envelope.exit_code not in (0, 5)
@@ -333,7 +333,7 @@ class FailingHistoryScraper(Scraper):
 def test_history_price_check_errors_propagate_from_resolve(failure):
     # FTDataSource.resolve() lets the error through, so history --price reports it
     source = FTDataSource(scraper_instance=FailingHistoryScraper(failure))
-    envelope = create_app(source).call(
+    envelope = app_over(source).call(
         "history", {"symbol": "AAPL", "price": 150.0, "date": "2025-01-15"}
     )
     assert envelope.exit_code not in (0, 5, 79)
