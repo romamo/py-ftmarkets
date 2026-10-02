@@ -62,13 +62,20 @@ class FTDataSource(DataSource):
         """
         Resolve a security based on criteria.
         Checks for FIGI (preferred), ISIN, Symbol, Description.
+        With a symbol as well, FIGI and ISIN hits count only when their symbol matches
+        it (see ``_matching_symbol``); else the symbol itself is searched.
         Validates against Price/Date if provided.
         """
+        symbol = (
+            Symbol(root=criteria.symbol) if isinstance(criteria.symbol, str) else criteria.symbol
+        )
         candidates: list[Security] = []
-        if criteria.figi:
-            candidates = self.scraper.search(str(criteria.figi))
-        if not candidates and criteria.isin:
-            candidates = self.scraper.search(str(criteria.isin))
+        for identifier in (criteria.figi, criteria.isin):
+            if candidates or not identifier:
+                continue
+            candidates = self.scraper.search(str(identifier))
+            if symbol:
+                candidates = self._matching_symbol(candidates, symbol)
         if not candidates and criteria.symbol:
             candidates = self.scraper.search(str(criteria.symbol))
         if not candidates and criteria.description:
@@ -129,6 +136,21 @@ class FTDataSource(DataSource):
             return None
 
         return filtered[0]
+
+    @staticmethod
+    def _matching_symbol(candidates: list[Security], symbol: Symbol) -> list[Security]:
+        """
+        The candidates whose FT symbol (``TICKER:EXCH[:CCY]``) matches ``symbol``,
+        ignoring case: exact matches if any, else those that ``symbol``'s parts begin,
+        so ``4GLD:LSE`` matches ``4GLD:LSE:GBX`` (but ``4GLD:LSE:GBX`` never matches
+        ``4GLD:LSE``, and ``4GLD:L`` never matches ``4GLD:LSE``).
+        """
+        wanted = str(symbol).upper().split(":")
+        parts = [(c, str(c.symbol).upper().split(":")) for c in candidates]
+        exact = [c for c, p in parts if p == wanted]
+        if exact:
+            return exact
+        return [c for c, p in parts if p[: len(wanted)] == wanted]
 
     def get_price(self, symbol: Symbol.Input, date: date | None = None) -> Price:
         """

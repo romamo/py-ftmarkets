@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - **`Scraper.search()` detects an exact-match tearsheet by the URL path only**: a query containing "tearsheet", such as `search("tearsheet")`, used to be parsed as a tearsheet and return `[]` (#19)
 - **BREAKING: `Scraper.get_xid()` raises `ScraperError` on a malformed `xid` config**: a `data-mod-config` that mentions `xid` must be a JSON object whose `xid`, when present, is a non-empty string or an integer. Such a config that is not JSON, not an object, or holds a `null` or other-typed `xid` used to be skipped at debug level, raise a raw `TypeError`, or yield the XID `"None"`. Configs of other modules (no `xid`) are still skipped, and an object without a top-level `xid` still falls back to the regex (#19)
 - **`Scraper.get_xid()` regex fallback** no longer reads an `xid` inside a longer name, such as `var maxid = 42;` (#19)
+- **BREAKING: `FTDataSource.resolve()` applies `SecurityQuery.symbol` alongside `figi` or `isin`**: it keeps only the FIGI or ISIN hits whose symbol matches, ignoring case (an exact match first, else a listing the symbol's `:`-separated parts begin, so `4GLD:LSE` matches `4GLD:LSE:GBX` but `4GLD:LSE:GBX` does not match `4GLD:LSE`); with none, it tries the ISIN after the FIGI, then searches the symbol itself. It used to take the first FIGI or ISIN hit and ignore the symbol, e.g. `4GLD:GER:EUR` for `isin="DE000A0S9GB0", symbol="4GLD:LSE:GBX"`. A query with only one of them is unchanged (#20)
 
 ## [0.8.0] - 2026-10-02
 
