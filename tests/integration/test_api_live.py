@@ -20,11 +20,14 @@ def test_search():
 
 
 def test_resolve_symbol():
-    # Test resolution by symbol
+    # FT's ranking is not ours to assert: resolve() picks one of the search results,
+    # and Apple's Nasdaq listing is among them
     ds = api.FTDataSource()
+    symbols = {str(r.symbol) for r in ds.search("AAPL")}
+    assert "AAPL:NSQ" in symbols
     sec = ds.resolve(SecurityQuery(symbol="AAPL"))
     assert sec is not None
-    assert str(sec.symbol) == "AAPL:NSQ"
+    assert str(sec.symbol) in symbols
 
 
 def test_history():
@@ -35,24 +38,21 @@ def test_history():
     assert isinstance(hist, History)
     assert len(hist.candles) > 0
 
-    # Verify pandas conversion (History model supports it if pandas installed)
-    try:
-        df = hist.to_pandas()
-        assert not df.empty
-        assert "Close" in df.columns
-    except ImportError:
-        pass
+    # pydantic-market-data installs pandas, so to_pandas() always works
+    df = hist.to_pandas()
+    assert not df.empty
+    assert "Close" in df.columns
 
 
 def test_datasource_interface():
     # Verify FTDataSource implementation basic check
     ds = api.FTDataSource()
-    results = ds.search("AAPL")
-    assert len(results) > 0
+    symbols = {str(r.symbol) for r in ds.search("AAPL")}
+    assert "AAPL:NSQ" in symbols
 
     sec = ds.resolve(SecurityQuery(symbol="AAPL"))
     assert sec is not None
-    assert str(sec.symbol) == "AAPL:NSQ"
+    assert str(sec.symbol) in symbols
 
 
 def test_resolve_with_price_validation():
