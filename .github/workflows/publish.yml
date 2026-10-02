@@ -26,6 +26,11 @@ jobs:
         run: |
           uv sync --all-extras --dev --python 3.10
           uv run --python 3.10 pytest
+      # The CLI tests need Python 3.14 and the cli extra; on 3.10 they are skipped
+      - name: Unit and CLI tests (3.14, cli extra)
+        run: |
+          uv sync --all-extras --dev --python 3.14
+          uv run --python 3.14 pytest
       - name: Build
         run: uv build
       # Check that basic features work and we didn't miss to include crucial files

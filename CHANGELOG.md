@@ -13,6 +13,12 @@ All notable changes to this project will be documented in this file.
 - **`get_history()`'s `History.security.currency`** is the currency the tearsheet states, read from the tearsheet it already fetches for the XID; it used to be unset (#8)
 - **Dependency**: Bumped `pydantic-market-data` to `>=0.9.0`, whose `ISIN` value object validates itself and is accepted by `Security(isin=...)`; the scraper now builds `ISIN(value)` directly and passes it to `Security` instead of working around the old behaviour. Search results are unchanged
 - **Dependency**: The `cli` extra pins `treaty==1.0.0rc20`
+- **Dependency**: `pandas` and `html5lib` are no longer direct dependencies; nothing in ftmarkets imports them. `pandas` still installs through `pydantic-market-data` (for `History.to_pandas()`), under its own floor (`pandas>=2.2.0`) rather than ours (`>=2.3.3`); `html5lib` no longer installs (#22)
+- **CI**: `ci.yml` tests Python 3.11, 3.12, and 3.13 as well as 3.10 and 3.14; `publish.yml` also runs the test suite on 3.14 with the `cli` extra, so the CLI tests run before `uv publish` (#22)
+
+### Fixed
+- **README**: `validate()` returns `False` when FT has no trading day within 5 days of the date, and raises `PriceVerificationError` only when that day exists and the price misses its range and close; the README said it raised whenever the price did not match (#22)
+- **GEMINI.md** mirrors CLAUDE.md (the treaty CLI, the test layout) instead of describing the removed pydantic-settings CLI (#22)
 
 ### Fixed
 - **`Scraper.get_history()` raises `ScraperError` on chart dates `History` rejects**: duplicate, out-of-order, or mixed-timezone `Dates` used to raise a raw pydantic `ValidationError` (#19)

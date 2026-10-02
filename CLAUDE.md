@@ -42,3 +42,8 @@ uv run ftmarkets --help        # run CLI
 - `tests/unit/test_cli.py`: the treaty CLI through `App.call`; it needs Python 3.14 and the `cli` extra (`uv run -p 3.14 --extra cli pytest`) and is skipped elsewhere
 - `tests/integration/test_api_live.py`: hits live markets.ft.com, marked `live` and deselected by `addopts`; run with `uv run pytest -m live`, or the manual `Live` workflow (`.github/workflows/live.yml`). Use sparingly to avoid rate limiting
 - `tests/smoke_test.py`: an import check `publish.yml` runs against the built wheel and sdist
+- CI (`.github/workflows/ci.yml`) runs `uv run pytest` on Python 3.10 to 3.14 and the treaty audit on 3.14 only; `publish.yml` runs the tests on 3.10 and on 3.14 with the `cli` extra, then smoke-tests the built wheel and sdist, before `uv publish`
+
+## Dependencies
+
+A runtime dependency is something `src/` uses: imported directly, or needed by what it imports (`pycountry` backs `pydantic-extra-types`' country and currency types). `pandas` is not one: `pydantic-market-data` brings it for `History.to_pandas()`. lxml's default HTML parser needs no `html5lib`.
