@@ -1,9 +1,9 @@
 import pytest
 from pydantic import ValidationError
 from pydantic_extra_types.currency_code import Currency
-from pydantic_market_data.models import Price
+from pydantic_market_data.models import ISIN, Price
 
-from ftmarkets.extract.schemas import Isin, Symbol
+from ftmarkets.extract.schemas import Symbol
 
 
 def test_symbol_valid():
@@ -12,8 +12,8 @@ def test_symbol_valid():
 
 
 def test_isin_valid():
-    i = Isin(root="US0378331002")
-    assert str(i) == "US0378331002"
+    i = ISIN(root="US0378331005")
+    assert str(i) == "US0378331005"
 
 
 def test_currency_valid():

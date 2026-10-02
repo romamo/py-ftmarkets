@@ -15,13 +15,6 @@ class Xid(RootModel):
 # Symbol is imported from pydantic_market_data.models
 
 
-class Isin(RootModel):
-    root: str
-
-    def __str__(self) -> str:
-        return self.root
-
-
 class DataPeriod(str, Enum):
     DAY = "Day"
     WEEK = "Week"

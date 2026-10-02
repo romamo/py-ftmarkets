@@ -10,7 +10,7 @@ from lxml import html
 from lxml.html import HtmlElement
 from pydantic_extra_types.country import CountryAlpha2
 from pydantic_extra_types.currency_code import Currency
-from pydantic_market_data.models import OHLCV, AssetClass, History, Security
+from pydantic_market_data.models import ISIN, OHLCV, AssetClass, History, Security, validate_isin
 
 from ..client import FTClient, client
 from .schemas import (
@@ -20,7 +20,6 @@ from .schemas import (
     ChartResponse,
     ComponentSeries,
     DataPeriod,
-    Isin,
     Symbol,
     Xid,
 )
@@ -63,9 +62,9 @@ class Scraper:
             return self._parse_tearsheet_as_search_result(response.url, tree, query_str)
 
         # Standard search results page
-        return self._parse_search_results(tree, query_str)
+        return self._parse_search_results(tree)
 
-    def _parse_search_results(self, tree: HtmlElement, query: str) -> list[Security]:
+    def _parse_search_results(self, tree: HtmlElement) -> list[Security]:
         results: list[Security] = []
         # Mapping for FT tab IDs/names to (AssetClass, security_type)
         asset_class_map: dict[str, tuple[AssetClass | None, str | None]] = {
@@ -98,7 +97,7 @@ class Scraper:
             if ac_pair == (None, None):
                 header = panel.xpath(".//h3")
                 if header:
-                    ft_name = header[0].text.strip()
+                    ft_name = header[0].text_content().strip()
                     ac_pair = asset_class_map.get(ft_name, (None, ft_name))
             asset_class, security_type = ac_pair
 
@@ -108,7 +107,7 @@ class Scraper:
                 if len(cols) >= 2:
                     name = cols[0].text_content().strip()
                     symbol_str = cols[1].text_content().strip()
-                    exchange = cols[2].text_content().strip() if len(cols) > 2 else None
+                    exchange = self._own_text(cols[2]) if len(cols) > 2 else None
                     country = cols[3].text_content().strip() if len(cols) > 3 else None
                     self._add_to_results(
                         results,
@@ -118,7 +117,6 @@ class Scraper:
                         country,
                         asset_class,
                         security_type,
-                        query,
                     )
 
         # 2. Capture ALL tearsheet links on the page (covers "Best Match" and other lists)
@@ -145,7 +143,6 @@ class Scraper:
                     None,
                     link_asset_class,
                     link_security_type,
-                    query,
                 )
 
         return results
@@ -159,11 +156,9 @@ class Scraper:
         country: str | None,
         asset_class: AssetClass | None,
         security_type: str | None,
-        query: str,
     ) -> None:
         country_code = self._map_country_to_code(country)
         currency = self._extract_currency(symbol) or self._map_country_to_currency(country_code)
-        isin_val = query if self._is_isin(query) else None
 
         sec = Security(
             symbol=symbol,
@@ -173,7 +168,6 @@ class Scraper:
             currency=currency,
             asset_class=asset_class,
             security_type=security_type,
-            isin=str(isin_val) if isin_val else None,
         )
         results.append(sec)
 
@@ -191,11 +185,11 @@ class Scraper:
             return []
 
         name_el = tree.xpath('//h1[@class="mod-tearsheet-overview__header__name"]')
-        name = name_el[0].text.strip() if name_el else query
+        name = name_el[0].text_content().strip() if name_el else query
 
-        isin = self._extract_isin_from_tearsheet(tree)
-        # Validate strict Isin if extracted
-        isin_val = Isin(root=isin).root if isin else (query if self._is_isin(query) else None)
+        # FT redirects to the tearsheet on an exact match, so an ISIN query names this
+        # security; an ISIN printed on the page takes precedence over the query
+        isin_val = self._extract_isin_from_tearsheet(tree) or self._parse_isin(query)
 
         asset_class: AssetClass | None = None
         security_type: str | None = None
@@ -212,7 +206,8 @@ class Scraper:
             Security(
                 symbol=symbol_code,
                 name=name,
-                isin=isin_val,
+                # pmd Security validates isin with str methods, so it takes the root
+                isin=isin_val.root if isin_val else None,
                 asset_class=asset_class,
                 security_type=security_type,
             )
@@ -353,11 +348,21 @@ class Scraper:
 
     # --- Helpers ---
 
-    def _extract_isin_from_tearsheet(self, tree: HtmlElement) -> str | None:
+    def _extract_isin_from_tearsheet(self, tree: HtmlElement) -> ISIN | None:
         isin_els = tree.xpath("//th[text()='ISIN']/following-sibling::td")
-        if isin_els and isin_els[0].text:
-            return isin_els[0].text.strip()
-        return None
+        if not isin_els or not isin_els[0].text_content().strip():
+            return None
+        raw = isin_els[0].text_content().strip()
+        isin = self._parse_isin(raw)
+        if isin is None:
+            raise ScraperError(f"Tearsheet states an invalid ISIN: {raw!r}")
+        return isin
+
+    @staticmethod
+    def _own_text(cell: HtmlElement) -> str | None:
+        """The cell's own text, without child elements such as FT's "Primary" badge."""
+        text = " ".join(t.strip() for t in cell.xpath("./text()") if t.strip())
+        return text or None
 
     def _map_country_to_code(self, country_name: str | None) -> str | None:
         if not country_name:
@@ -450,8 +455,14 @@ class Scraper:
         curr = mapping.get(country_code)
         return cast(Currency, curr) if curr else None
 
-    def _is_isin(self, query: str) -> bool:
-        return len(query) == 12 and query[:2].isalpha() and query[2:].isalnum()
+    @staticmethod
+    def _parse_isin(value: str) -> ISIN | None:
+        """The value as an `ISIN` if it is one (format and checksum), else None."""
+        try:
+            cleaned = validate_isin(value)
+        except ValueError:
+            return None
+        return ISIN(root=cleaned) if cleaned else None
 
 
 # Singleton instance not strictly needed but useful for API
