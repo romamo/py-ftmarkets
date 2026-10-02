@@ -22,7 +22,20 @@ pip install "py-ftmarkets[cli]"
 
 `--format` takes `plain` (the default on a terminal), `json` (the full response envelope with `ok`, `data`, `error`, `warnings`, and `meta`; the default when piped), `jsonl`, `ndjson`, and `tsv`. `-v` and `-vv` show info and debug logs on stderr. `ftmarkets <command> --help` lists the flags and `--schema` the input and output schemas.
 
-Exit codes: `0` success, `2` invalid arguments (nothing ran), `5` security or history not found, `79` the price check failed (`history --price`).
+Exit codes (`error.code` in the JSON envelope says which case it is; `error.retryable` whether the same command may succeed later):
+
+| Exit | Name | Retryable | When |
+|---|---|---|---|
+| `0` | `SUCCESS` | | |
+| `2` | `ARG_ERROR` | no | Invalid arguments; nothing ran |
+| `4` | `PRECONDITION` | no | `TLS_FAILED`: the TLS connection to FT failed; point `REQUESTS_CA_BUNDLE` or `SSL_CERT_FILE` at the right CA bundle |
+| `5` | `NOT_FOUND` | no | Security or history not found |
+| `11` | `RATE_LIMITED` | yes | FT answered 429; wait `error.retry_after_ms` (from `Retry-After`, else 30 s) |
+| `12` | `UNAVAILABLE` | yes | `CONNECTION_FAILED` (FT unreachable), `UPSTREAM_TIMEOUT` (no answer in time), or `UPSTREAM_UNAVAILABLE` (FT answered 5xx); retry with back-off |
+| `79` | `PRICE_MISMATCH` | no | The price check failed (`history --price`) |
+| `80` | `UPSTREAM_CHANGED` | no | `FT_PAGE_CHANGED`: FT's page or chart data changed shape; `UPSTREAM_REJECTED`: FT refused the request with a 4xx other than 429. Please [report it](https://github.com/romamo/py-ftmarkets/issues) with the command and the symbol |
+
+Any other failure is a bug in ftmarkets and exits `1` (`HANDLER_CRASHED`).
 
 ### Lookup a Security
 

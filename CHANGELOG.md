@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **CLI exit codes for FT's failures**: `lookup` and `history` answer FT being unreachable, timing out, or answering 5xx with exit 12 (`UNAVAILABLE`, error codes `CONNECTION_FAILED`, `UPSTREAM_TIMEOUT`, `UPSTREAM_UNAVAILABLE`) and a 429 with exit 11 (`RATE_LIMITED`, with `retry_after_ms` from `Retry-After`), both retryable; a `ScraperError` (`FT_PAGE_CHANGED`) or another 4xx (`UPSTREAM_REJECTED`) with the new exit 80 (`UPSTREAM_CHANGED`), and a TLS failure with exit 4 (`PRECONDITION`, `TLS_FAILED`), neither retryable. They used to exit 1 as `HANDLER_CRASHED`, which reads as a bug in ftmarkets (#17)
+
+### Changed
+- **`FTClient` returns FT's last answer once its status retries run out**: after the retries on 429, 500, 502, 503, and 504, `raise_for_status()` raises an `HTTPError` carrying the status and `Retry-After`, not a `requests.exceptions.RetryError` that has neither (#17)
+
 ## [0.8.0] - 2026-10-02
 
 ### Added

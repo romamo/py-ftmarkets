@@ -292,21 +292,27 @@ def test_lookup_price_validation_without_a_match_is_not_found():
     assert envelope.exit_code == 5
 
 
+def server_error() -> requests.HTTPError:
+    response = requests.Response()
+    response.status_code = 503
+    return requests.HTTPError("503 Server Error", response=response)
+
+
 @pytest.mark.parametrize(
-    "failure",
+    ("failure", "code"),
     [
-        ScraperError("Malformed chart response for 0R2V:LSE"),
-        requests.exceptions.HTTPError("503 Server Error"),
+        (ScraperError("Malformed chart response for 0R2V:LSE"), "FT_PAGE_CHANGED"),
+        (server_error(), "UPSTREAM_UNAVAILABLE"),
     ],
 )
-def test_lookup_price_check_errors_propagate(failure):
+def test_lookup_price_check_errors_propagate(failure, code):
     # A scraper or HTTP failure is an error, not "this candidate did not match"
     source = FakeSource(APPLE, matching={"APC:FRA"}, failing={"0R2V:LSE": failure})
     envelope = app_over(source).call(
         "lookup", {"isin": "US0378331005", "price": 150.0, "date": "2025-01-15", "limit": 0}
     )
     assert envelope.exit_code not in (0, 5)
-    assert error(envelope)["code"] != "NOT_FOUND"
+    assert error(envelope)["code"] == code
     assert source.validated == ["AAPL:NSQ", "0R2V:LSE"]
 
 
@@ -324,21 +330,20 @@ class FailingHistoryScraper(Scraper):
 
 
 @pytest.mark.parametrize(
-    "failure",
+    ("failure", "code"),
     [
-        ScraperError("Malformed chart response for AAPL:NSQ"),
-        requests.exceptions.HTTPError("503 Server Error"),
+        (ScraperError("Malformed chart response for AAPL:NSQ"), "FT_PAGE_CHANGED"),
+        (server_error(), "UPSTREAM_UNAVAILABLE"),
     ],
 )
-def test_history_price_check_errors_propagate_from_resolve(failure):
+def test_history_price_check_errors_propagate_from_resolve(failure, code):
     # FTDataSource.resolve() lets the error through, so history --price reports it
     source = FTDataSource(scraper_instance=FailingHistoryScraper(failure))
     envelope = app_over(source).call(
         "history", {"symbol": "AAPL", "price": 150.0, "date": "2025-01-15"}
     )
     assert envelope.exit_code not in (0, 5, 79)
-    assert error(envelope)["code"] not in ("NOT_FOUND", "PRICE_MISMATCH")
-    assert error(envelope)["context"]["exception"] == type(failure).__name__
+    assert error(envelope)["code"] == code
 
 
 def test_history_returns_security_and_ordered_candles():

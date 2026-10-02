@@ -40,12 +40,15 @@ class FTClient:
             self.session.proxies = dict(proxies)
         self.session.verify = verify
 
-        # Retry strategy
+        # Retry strategy. Once the retries on a status run out, the last response is
+        # returned rather than a RetryError, so raise_for_status() raises an HTTPError that
+        # keeps the status and the Retry-After header
         retries = Retry(
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "POST", "OPTIONS"],
+            raise_on_status=False,
         )
         adapter = HTTPAdapter(max_retries=retries)
         self.session.mount("https://", adapter)
