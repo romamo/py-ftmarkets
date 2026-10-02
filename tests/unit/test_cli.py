@@ -3,6 +3,7 @@
 from datetime import date, datetime
 
 import pytest
+import requests
 from pydantic_market_data.models import (
     OHLCV,
     History,
@@ -18,7 +19,9 @@ pytest.importorskip("treaty")
 
 from treaty import Envelope  # noqa: E402
 
+from ftmarkets.api import FTDataSource  # noqa: E402
 from ftmarkets.cli_app import create_app  # noqa: E402
+from ftmarkets.extract.scraper import Scraper, ScraperError  # noqa: E402
 
 APPLE = [
     Security(symbol="AAPL:NSQ", name="Apple Inc.", currency="USD", country="US"),
@@ -36,10 +39,12 @@ class FakeSource:
         securities: list[Security],
         matching: set[str] | None = None,
         priced: set[str] | None = None,
+        failing: dict[str, Exception] | None = None,
     ):
         self.securities = securities
         self.matching = matching if matching is not None else set()
         self.priced = priced if priced is not None else self.matching
+        self.failing = failing if failing is not None else {}
         self.validated: list[str] = []
         self.periods: list[HistoryPeriod] = []
 
@@ -72,6 +77,8 @@ class FakeSource:
         price_tolerance: float = 0.10,
     ) -> bool:
         self.validated.append(str(symbol))
+        if str(symbol) in self.failing:
+            raise self.failing[str(symbol)]
         if str(symbol) in self.matching:
             return True
         raise PriceVerificationError(
@@ -278,6 +285,55 @@ def test_lookup_price_validation_without_a_match_is_not_found():
         "lookup", {"isin": "US0378331005", "price": 150.0, "date": "20250115"}
     )
     assert envelope.exit_code == 5
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ScraperError("Malformed chart response for 0R2V:LSE"),
+        requests.exceptions.HTTPError("503 Server Error"),
+    ],
+)
+def test_lookup_price_check_errors_propagate(failure):
+    # A scraper or HTTP failure is an error, not "this candidate did not match"
+    source = FakeSource(APPLE, matching={"APC:FRA"}, failing={"0R2V:LSE": failure})
+    envelope = create_app(source).call(
+        "lookup", {"isin": "US0378331005", "price": 150.0, "date": "2025-01-15", "limit": 0}
+    )
+    assert envelope.exit_code not in (0, 5)
+    assert error(envelope)["code"] != "NOT_FOUND"
+    assert source.validated == ["AAPL:NSQ", "0R2V:LSE"]
+
+
+class FailingHistoryScraper(Scraper):
+    """Finds APPLE, but every history fetch fails with ``failure``"""
+
+    def __init__(self, failure: Exception) -> None:
+        self.failure = failure
+
+    def search(self, query: Symbol.Input) -> list[Security]:
+        return list(APPLE)
+
+    def get_history(self, symbol: Symbol.Input, days: int = 30) -> History:
+        raise self.failure
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        ScraperError("Malformed chart response for AAPL:NSQ"),
+        requests.exceptions.HTTPError("503 Server Error"),
+    ],
+)
+def test_history_price_check_errors_propagate_from_resolve(failure):
+    # FTDataSource.resolve() lets the error through, so history --price reports it
+    source = FTDataSource(scraper_instance=FailingHistoryScraper(failure))
+    envelope = create_app(source).call(
+        "history", {"symbol": "AAPL", "price": 150.0, "date": "2025-01-15"}
+    )
+    assert envelope.exit_code not in (0, 5, 79)
+    assert error(envelope)["code"] not in ("NOT_FOUND", "PRICE_MISMATCH")
+    assert error(envelope)["context"]["exception"] == type(failure).__name__
 
 
 def test_history_returns_security_and_ordered_candles():
