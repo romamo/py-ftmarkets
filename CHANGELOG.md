@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- **Dependency**: Bumped `pydantic-market-data` to `>=0.7.0`
+- **BREAKING: `SecurityQuery.price_on` dates**: `pydantic-market-data` 0.7.0 makes `FlexibleDate` accept only `YYYY-MM-DD`, `YYYY/MM/DD`, or `YYYYMMDD` strings (or `date`/`datetime` objects) and reject impossible dates, so a `SecurityQuery` (re-exported from `ftmarkets.api`) or `PriceOnDate` built from any other date string, such as `15/01/2025`, now raises `ValidationError` before it reaches `FTDataSource.resolve()`. `ftmarkets.utils.parse_date` is unchanged
+- **CLI `--date`**: still accepts the same three formats and still exits 2 on anything else, but the check is now `pydantic-market-data`'s `FlexibleDate` instead of the CLI's own; the error message reads `Invalid date: '15/01/2025'; expected YYYY-MM-DD, YYYY/MM/DD or YYYYMMDD`
+
 ## [0.7.0] - 2026-10-02
 
 ### Added

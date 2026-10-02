@@ -126,16 +126,21 @@ def test_non_year_first_date_exits_2(command, value):
     source = FakeSource(APPLE, matching={"AAPL:NSQ"})
     envelope = create_app(source).call(command, {"symbol": "AAPL", "price": 150.0, "date": value})
     assert envelope.exit_code == 2
+    assert error(envelope)["phase"] == "validation"
     assert error(envelope)["errors"][0]["field"] == "date"
+    # pydantic-market-data's FlexibleDate names the accepted formats
+    assert "YYYY-MM-DD, YYYY/MM/DD or YYYYMMDD" in error(envelope)["errors"][0]["message"]
     assert source.validated == []
 
 
 @pytest.mark.parametrize("command", ["lookup", "history"])
-def test_impossible_date_exits_2(command):
+@pytest.mark.parametrize("value", ["2025-13-01", "2024-02-30"])
+def test_impossible_date_exits_2(command, value):
     envelope = create_app(FakeSource(APPLE)).call(
-        command, {"symbol": "AAPL", "price": 150.0, "date": "2025-13-01"}
+        command, {"symbol": "AAPL", "price": 150.0, "date": value}
     )
     assert envelope.exit_code == 2
+    assert error(envelope)["phase"] == "validation"
     assert error(envelope)["errors"][0]["field"] == "date"
 
 
