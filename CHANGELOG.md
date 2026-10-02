@@ -12,6 +12,12 @@ All notable changes to this project will be documented in this file.
 - **Dependency**: Bumped `pydantic-market-data` to `>=0.9.0`, whose `ISIN` value object validates itself and is accepted by `Security(isin=...)`; the scraper now builds `ISIN(value)` directly and passes it to `Security` instead of working around the old behaviour. Search results are unchanged
 - **Dependency**: The `cli` extra pins `treaty==1.0.0rc20`
 
+### Fixed
+- **`Scraper.get_history()` raises `ScraperError` on chart dates `History` rejects**: duplicate, out-of-order, or mixed-timezone `Dates` used to raise a raw pydantic `ValidationError` (#19)
+- **`Scraper.search()` detects an exact-match tearsheet by the URL path only**: a query containing "tearsheet", such as `search("tearsheet")`, used to be parsed as a tearsheet and return `[]` (#19)
+- **BREAKING: `Scraper.get_xid()` raises `ScraperError` on a malformed `xid` config**: a `data-mod-config` that mentions `xid` must be a JSON object whose `xid`, when present, is a non-empty string or an integer. Such a config that is not JSON, not an object, or holds a `null` or other-typed `xid` used to be skipped at debug level, raise a raw `TypeError`, or yield the XID `"None"`. Configs of other modules (no `xid`) are still skipped, and an object without a top-level `xid` still falls back to the regex (#19)
+- **`Scraper.get_xid()` regex fallback** no longer reads an `xid` inside a longer name, such as `var maxid = 42;` (#19)
+
 ## [0.8.0] - 2026-10-02
 
 ### Added

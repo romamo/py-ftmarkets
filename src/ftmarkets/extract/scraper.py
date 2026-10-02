@@ -2,7 +2,7 @@ import html as html_lib
 import json
 import logging
 import re
-from typing import Any, cast
+from typing import cast
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -59,8 +59,9 @@ class Scraper:
 
         tree = cast(HtmlElement, html.fromstring(response.content))
 
-        # Check for direct redirect (tearsheet)
-        if "tearsheet" in response.url:
+        # Check for direct redirect (tearsheet); only the path counts, since the query
+        # string carries the user's search text
+        if "/tearsheet/" in urlparse(response.url).path:
             return self._parse_tearsheet_as_search_result(response.url, tree, query_str)
 
         # Standard search results page
@@ -280,30 +281,13 @@ class Scraper:
 
         tree = html.fromstring(resp.content)
 
-        xid_str = None
-
-        # Method A: data-mod-config
-        divs = cast(list[Any], tree.xpath("//div[@data-mod-config] | //section[@data-mod-config]"))
-        for div in divs:
-            try:
-                div_el = cast(HtmlElement, div)
-                raw_cfg = div_el.get("data-mod-config")
-                if raw_cfg:
-                    # It might be URL-encoded or HTML-escaped
-                    decoded_cfg = html_lib.unescape(raw_cfg)
-                    cfg = json.loads(decoded_cfg)
-                    if "xid" in cfg:
-                        xid_str = str(cfg["xid"])
-                        break
-            except (ValueError, KeyError, json.JSONDecodeError) as e:
-                logger.debug("Failed to parse data-mod-config: %s", e)
-                continue
+        xid_str = self._xid_from_mod_configs(tree, symbol)
 
         if not xid_str:
             # Method B: Regex fallback
             # xid: 123, xid=123, "xid": "123", 'xid':123, &quot;xid&quot;:&quot;123&quot;
             regex = (
-                r'(?:"xid"|\'xid\'|&quot;xid&quot;|xid)\s*[:=]\s*'
+                r'(?:"xid"|\'xid\'|&quot;xid&quot;|\bxid)\s*[:=]\s*'
                 r'(?:["\']|&quot;)?(\d+)(?:["\']|&quot;)?'
             )
             match = re.search(regex, resp.text)
@@ -314,6 +298,54 @@ class Scraper:
             raise ScraperError(f"Could not determine internal FT ID for ticker {symbol.root}")
 
         return Xid(root=xid_str)
+
+    _XID_WORD = re.compile(r"\bxid\b")
+
+    def _xid_from_mod_configs(self, tree: HtmlElement, symbol: Symbol) -> str | None:
+        """
+        The XID from the page's ``data-mod-config`` attributes, or None to fall back
+        to the regex.
+
+        A tearsheet carries configs for unrelated modules too (charts keyed by
+        ``issueID``, ETF holdings as a JSON list), so only a config that mentions
+        ``xid`` is judged: it must be a JSON object, and its ``xid``, when present, a
+        non-empty string or an integer. Such a config that is not JSON, not an object,
+        or holds another ``xid`` raises ScraperError (FT changed its markup). An object
+        without a top-level ``xid`` and configs that never mention it are skipped.
+        """
+        nodes = cast(
+            list[HtmlElement], tree.xpath("//div[@data-mod-config] | //section[@data-mod-config]")
+        )
+        for node in nodes:
+            raw_cfg = node.get("data-mod-config")
+            if not raw_cfg:
+                continue
+            # lxml unescapes attributes once; FT may escape the JSON a second time
+            decoded_cfg = html_lib.unescape(raw_cfg)
+            if not self._XID_WORD.search(decoded_cfg):
+                continue
+            try:
+                cfg = json.loads(decoded_cfg)
+            except json.JSONDecodeError as e:
+                raise ScraperError(
+                    f"Tearsheet for {symbol.root} has a data-mod-config that is not JSON: "
+                    f"{decoded_cfg[:200]!r}"
+                ) from e
+            if not isinstance(cfg, dict):
+                raise ScraperError(
+                    f"Tearsheet for {symbol.root} has a data-mod-config that is not a JSON "
+                    f"object: {decoded_cfg[:200]!r}"
+                )
+            if "xid" not in cfg:
+                continue
+            xid = cfg["xid"]
+            if isinstance(xid, bool) or not isinstance(xid, (str, int)) or xid == "":
+                raise ScraperError(
+                    f"Tearsheet for {symbol.root} has a data-mod-config with an invalid "
+                    f"xid: {xid!r}"
+                )
+            return str(xid)
+        return None
 
     def _convert_to_history(self, symbol: Symbol, data: ChartResponse) -> History:
         """
@@ -370,18 +402,22 @@ class Scraper:
             ohlc[kind] = found
         vols = values(vol_el.component_series, ComponentSeriesType.VOLUME) if vol_el else None
 
-        candles = [
-            OHLCV(
-                date=dt,
-                open=ohlc[ComponentSeriesType.OPEN][i],
-                high=ohlc[ComponentSeriesType.HIGH][i],
-                low=ohlc[ComponentSeriesType.LOW][i],
-                close=ohlc[ComponentSeriesType.CLOSE][i],
-                volume=vols[i] if vols is not None else None,
-            )
-            for i, dt in enumerate(data.dates)
-        ]
-        return History(security=security, candles=candles)
+        try:
+            candles = [
+                OHLCV(
+                    date=dt,
+                    open=ohlc[ComponentSeriesType.OPEN][i],
+                    high=ohlc[ComponentSeriesType.HIGH][i],
+                    low=ohlc[ComponentSeriesType.LOW][i],
+                    close=ohlc[ComponentSeriesType.CLOSE][i],
+                    volume=vols[i] if vols is not None else None,
+                )
+                for i, dt in enumerate(data.dates)
+            ]
+            # History rejects duplicate, out-of-order, and mixed-timezone dates
+            return History(security=security, candles=candles)
+        except ValidationError as e:
+            raise ScraperError(f"Malformed chart response for {symbol.root}: {e}") from e
 
     # --- Helpers ---
 
