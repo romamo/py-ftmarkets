@@ -318,8 +318,27 @@ def test_http_400_errors(scraper, mock_client):
     with pytest.raises(requests.exceptions.HTTPError):
         scraper.get_xid(Symbol(root="AAPL"))
 
-    mock_client.post.return_value = mock_resp
+    client = TearsheetClient(chart=mock_resp)
     with pytest.raises(requests.exceptions.HTTPError):
-        # We need a valid XID to bypass get_xid, so we patch get_xid
-        scraper.get_xid = MagicMock(return_value=Xid(root="123"))
-        scraper.get_history(Symbol(root="AAPL"), 10)
+        Scraper(http_client=client).get_history(Symbol(root="AAPL"), 10)
+    # get_xid read XID 123 off the fake tearsheet before the chart API answered 400
+    assert [e["Symbol"] for e in client.posted[0]["elements"]] == ["123", "123"]
+
+
+TEARSHEET = '<html><body><div data-mod-config=\'{"xid":"123"}\'></div></body></html>'
+
+
+class TearsheetClient:
+    """A fake FTClient: every GET answers FT's tearsheet page for XID 123, so get_xid
+    finds it, and every POST to the chart API answers ``chart``"""
+
+    def __init__(self, chart: MagicMock):
+        self.chart = chart
+        self.posted: list[dict] = []
+
+    def get(self, path: str, params: dict | None = None, **kwargs) -> MagicMock:
+        return MagicMock(status_code=200, content=TEARSHEET.encode(), text=TEARSHEET)
+
+    def post(self, path: str, json: dict | None = None, **kwargs) -> MagicMock:
+        self.posted.append(json or {})
+        return self.chart

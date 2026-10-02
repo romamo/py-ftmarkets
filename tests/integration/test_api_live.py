@@ -1,10 +1,15 @@
+"""Against live markets.ft.com: deselected by default, run with ``uv run pytest -m live``"""
+
 from datetime import date
 
+import pytest
 from pydantic_market_data.models import History, HistoryPeriod, PriceOnDate, SecurityQuery
 from pydantic_market_data.models import Price as PMDPrice
 
 from ftmarkets import api
 from ftmarkets.extract.schemas import Symbol
+
+pytestmark = pytest.mark.live
 
 
 def test_search():

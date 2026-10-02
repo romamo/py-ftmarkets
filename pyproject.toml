@@ -25,8 +25,11 @@ dependencies = [
     "html5lib>=1.1",
     "lxml>=6.0.2",
     "pandas>=2.3.3",
+    "pycountry>=24.6.1",
     "pydantic>=2.12.5",
+    "pydantic-extra-types>=2.11.0",
     "requests>=2.32.5",
+    "urllib3>=2.6.3",
     "pydantic-market-data>=0.7.0",
 ]
 
@@ -34,9 +37,9 @@ dependencies = [
 cli = ["treaty==1.0.0rc19; python_version >= '3.14'"]
 
 [project.urls]
-Homepage = "https://github.com/romamo/ftfinance"
-Repository = "https://github.com/romamo/ftfinance"
-Issues = "https://github.com/romamo/ftfinance/issues"
+Homepage = "https://github.com/romamo/py-ftmarkets"
+Repository = "https://github.com/romamo/py-ftmarkets"
+Issues = "https://github.com/romamo/py-ftmarkets/issues"
 
 [project.scripts]
 ftmarkets = "ftmarkets.cli:main"
@@ -50,6 +53,10 @@ exclude = [
     "uv.lock",
     "implementation_plan.md",
     "tmp",
+    ".claude",
+    "docs/sessions",
+    "CLAUDE.md",
+    "GEMINI.md",
 ]
 
 [build-system]
@@ -76,6 +83,12 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = []
+
+[tool.pytest.ini_options]
+markers = [
+    "live: hits markets.ft.com; deselected by default, run with `uv run pytest -m live`",
+]
+addopts = "-m 'not live'"
 
 [tool.mypy]
 ignore_missing_imports = true
