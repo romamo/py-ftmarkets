@@ -29,7 +29,9 @@ SEARCH_PAGE = """
   <td>United Kingdom</td>
 </tr>
 </tbody></table>
-</div></html>
+</div>
+<a href="/data/equities/tearsheet/summary?s=MSFT:NSQ">Microsoft Corp</a>
+</html>
 """
 
 TEARSHEET_PAGE = """
@@ -78,13 +80,22 @@ def make_scraper(page: str, url: str = SEARCH_URL) -> Scraper:
 def test_non_isin_twelve_char_query_does_not_crash():
     # Two letters + ten alphanumerics used to be stamped as an ISIN and fail validation
     results = make_scraper(SEARCH_PAGE).search("AMAZONCOMINC")
-    assert [str(r.symbol) for r in results] == ["AAPL:NSQ", "VOD:LSE"]
+    assert [str(r.symbol) for r in results] == ["AAPL:NSQ", "VOD:LSE", "MSFT:NSQ"]
     assert all(r.isin is None for r in results)
 
 
-def test_isin_query_is_not_copied_onto_search_rows():
+def test_isin_query_tags_table_rows_but_not_link_rows():
     results = make_scraper(SEARCH_PAGE).search("US0378331005")
-    assert len(results) == 2
+    assert {str(r.symbol): (str(r.isin) if r.isin else None) for r in results} == {
+        "AAPL:NSQ": "US0378331005",
+        "VOD:LSE": "US0378331005",
+        "MSFT:NSQ": None,
+    }
+
+
+def test_isin_query_failing_checksum_tags_no_rows():
+    results = make_scraper(SEARCH_PAGE).search("US0378331002")
+    assert len(results) == 3
     assert all(r.isin is None for r in results)
 
 
@@ -93,6 +104,7 @@ def test_exchange_cell_excludes_primary_badge():
     assert [r.exchange for r in results] == [
         "Consolidated Issue Listed on NASDAQ Global Select",
         "London Stock Exchange",
+        None,
     ]
 
 
