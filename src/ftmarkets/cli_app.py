@@ -5,7 +5,6 @@ and that treaty is installed first. ``create_app`` takes the data source, so tes
 every command in-process through ``App.call`` against a fake source.
 """
 
-import re
 from datetime import date
 from importlib.metadata import version
 
@@ -27,17 +26,9 @@ from treaty import App, Ctx, Exit, Page, ParseError, RequiresAny
 from .api import FTDataSource
 from .extract.scraper import ScraperError
 
+# FlexibleDate validates the format; the field is re-declared only so --help names it
 _DATE_FORMATS = "YYYY-MM-DD, YYYY/MM/DD, or YYYYMMDD"
-# FlexibleDate parses through pandas, which also takes 01/02/2025 (month first) and
-# other ambiguous shapes; the CLI admits only year-first dates
-_YEAR_FIRST = re.compile(r"\d{4}([-/]?)\d{2}\1\d{2}")
 _IDENTIFIERS = ("isin", "symbol", "desc")
-
-
-def _check_date_format(value: object) -> object:
-    if isinstance(value, str) and not _YEAR_FIRST.fullmatch(value):
-        raise ValueError(f"date {value!r} is not {_DATE_FORMATS}")
-    return value
 
 
 def _check_price_has_date(price: float | None, info: ValidationInfo) -> float | None:
@@ -58,7 +49,6 @@ class LookupArgs(SecurityQueryArgs):
         description="FT security type (ETF, Fund, Equity, Index), case-insensitive",
     )
 
-    _date = field_validator("date", mode="before")(_check_date_format)
     _price = field_validator("price")(_check_price_has_date)
 
 
@@ -69,7 +59,6 @@ class HistoryArgs(HistoryQueryArgs):
         None, description=f"Date the --price is checked on ({_DATE_FORMATS})"
     )
 
-    _date = field_validator("date", mode="before")(_check_date_format)
     _price = field_validator("price")(_check_price_has_date)
 
 
