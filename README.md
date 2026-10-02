@@ -101,8 +101,9 @@ print(f"Symbol: {security.symbol}")
 history = source.history(security.symbol, period=HistoryPeriod.MO1)
 print(history.to_pandas().tail())
 
-# Validate a price: True when it is within the day's range, or within 10% of the close,
-# on the nearest trading day up to 5 days away; raises PriceVerificationError otherwise
+# Validate a price against the nearest trading day up to 5 days away: True when the price
+# is within that day's range, or within 10% of its close; False when FT has no trading
+# day that close; raises PriceVerificationError when the day exists but the price misses
 is_valid = source.validate(security.symbol, target_date=date(2025, 1, 15), target_price=83.50)
 print(f"Price valid: {is_valid}")
 ```
