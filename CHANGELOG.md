@@ -6,13 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - **`FTClient(proxies=..., verify=...)`**: a `requests`-style proxy mapping (replacing the proxy environment variables when given, `{}` for a direct connection) and a CA bundle path; `FTClient()` and the shared `client` behave as before (#11)
+- **`live` pytest marker**: the tests that hit markets.ft.com are deselected by default (`addopts = "-m 'not live'"`); run them with `uv run pytest -m live` or the manual `Live` workflow (#12)
+- **README example test**: the README's library example runs in the default suite against a fake scraper, and unchanged under `live` (#12)
 
 ### Changed
 - **BREAKING: `FTClient.get`/`FTClient.post`** take only a `/`-relative path on markets.ft.com and raise `ValueError` on anything else, such as an absolute URL, which `get` used to fetch as is (#11)
 - **`ftmarkets.cli_app.create_app`** takes a source factory, `Callable[[NetworkSettings], DataSource]`, called once per run with `ctx.network`, instead of a `DataSource`; `ft_source` builds the live FT source (#11)
 - **Dependency**: The `cli` extra pins `treaty==1.0.0rc19` (#11)
+- **CI**: `publish.yml` runs the unit tests on Python 3.10 and `ftmarkets --version` from the built wheel with the `cli` extra on Python 3.14 before `uv publish`; `ci.yml` uses `astral-sh/setup-uv@v7` like `publish.yml` (#12)
 - **Dependency**: Bumped `pydantic-market-data` to `>=0.7.0`
-- **BREAKING: `SecurityQuery.price_on` dates**: `pydantic-market-data` 0.7.0 makes `FlexibleDate` accept only `YYYY-MM-DD`, `YYYY/MM/DD`, or `YYYYMMDD` strings (or `date`/`datetime` objects) and reject impossible dates, so a `SecurityQuery` (re-exported from `ftmarkets.api`) or `PriceOnDate` built from any other date string, such as `15/01/2025`, now raises `ValidationError` before it reaches `FTDataSource.resolve()`. `ftmarkets.utils.parse_date` is unchanged
+- **BREAKING: `SecurityQuery.price_on` dates**: `pydantic-market-data` 0.7.0 makes `FlexibleDate` accept only `YYYY-MM-DD`, `YYYY/MM/DD`, or `YYYYMMDD` strings (or `date`/`datetime` objects) and reject impossible dates, so a `SecurityQuery` (re-exported from `ftmarkets.api`) or `PriceOnDate` built from any other date string, such as `15/01/2025`, now raises `ValidationError` before it reaches `FTDataSource.resolve()`
 - **Search results set `isin` only from a valid ISIN query**: rows of FT's search-results table carry the query as `isin` only when it is a valid ISIN (format and checksum); the other tearsheet links on the page (best matches, which may be unrelated) no longer get it. An exact-match tearsheet takes the ISIN printed on the page, else the query when it is a valid ISIN (#7)
 - **`ftmarkets.extract.schemas.Isin` removed**: the scraper uses `pydantic-market-data`'s `ISIN` value object instead (#7)
 - **BREAKING: `FTDataSource.resolve()` no longer swallows errors**: during a price check only `PriceVerificationError` moves on to the next candidate; a `ScraperError`, an HTTP or connection error, or any other exception now propagates instead of turning into `None`, so the CLI's `history --price` reports the failure rather than NOT_FOUND or PRICE_MISMATCH (#9)
@@ -25,6 +28,9 @@ All notable changes to this project will be documented in this file.
 - **BREAKING: `Scraper.get_history()` raises `ScraperError` on a malformed chart response**: dates without a price element, a missing Open/High/Low/Close series, any series whose length differs from the dates, values without dates, and a body that is not JSON or does not fit `ChartResponse` (which used to raise `ValidationError` or `JSONDecodeError`). It used to return an empty `History` or pad the candles with `None`. A response with an empty `Dates` list is "no data" and still gives an empty `History` (the CLI's `NOT_FOUND`); a missing volume element still leaves `volume` empty (#10)
 
 ### Fixed
+- **`ftmarkets.__version__`** comes from the installed package metadata instead of a hard-coded `"0.2.0"` (#12)
+- **README library example**: imports `SecurityQuery` (not the removed `SecurityCriteria`), passes `target_date` as a `date`, and no longer advertises preferred-exchange mapping or an async-ready architecture, neither of which exists (#12)
+- **Package metadata**: `[project.urls]` point to `romamo/py-ftmarkets`; `pycountry`, `pydantic-extra-types`, and `urllib3`, imported directly, are declared dependencies; the sdist no longer ships `CLAUDE.md`, `GEMINI.md`, `docs/sessions/`, or `.claude/` (#12)
 - **`search()` crashed on 12-character non-ISIN queries** such as `AMAZONCOMINC`, which were taken for ISINs and failed `Security` validation; they now leave `isin` unset (#7)
 - **Search `exchange` included FT's badge text**: `London Stock ExchangePrimary` is now `London Stock Exchange` (#7)
 - **Search results section headers and tearsheet names with child elements** no longer crash parsing (#7)
@@ -34,6 +40,9 @@ All notable changes to this project will be documented in this file.
 - **Query encoding**: `Scraper.get_xid` sends the symbol as an encoded `s` query parameter instead of pasting it into the URL, so a symbol containing `&`, `=`, or `#` no longer adds or cuts parameters (#11)
 - **CLI `--proxy`, `--no-proxy`, and CA bundle**: treaty's network settings (`--proxy`, `--no-proxy`, `HTTP(S)_PROXY`, `NO_PROXY`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`) now reach the `requests.Session` the CLI talks to FT with; before, the flags were advertised but had no effect (#11)
 - **XID regex fallback**: `Scraper.get_xid` also finds a quoted JSON key, `"xid": "123"` or `"xid":123`, when the tearsheet's `data-mod-config` does not hold it; the fallback matched only `xid:`, `xid=`, and `&quot;xid&quot;` (#11)
+
+### Removed
+- **BREAKING: `ftmarkets.utils`** and its `parse_date`, which nothing in the package used, returned `None` on bad input, and read `01/02/2025` day first; use `pydantic-market-data`'s `parse_date` or `FlexibleDate` (#12)
 
 ## [0.7.0] - 2026-10-02
 

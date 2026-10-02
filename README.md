@@ -71,30 +71,32 @@ ftmarkets history --isin DE000A0S9GB0 --period 1y --price 120.50 --date 2025-01-
 `py-ftmarkets` implements the `DataSource` interface from `pydantic-market-data`.
 
 ```python
+from datetime import date
+
+from pydantic_market_data.models import HistoryPeriod, SecurityQuery
+
 from ftmarkets.api import FTDataSource
-from pydantic_market_data.models import SecurityCriteria
 
 source = FTDataSource()
 
-# Resolve a security
-criteria = SecurityCriteria(isin="DE000A0S9GB0")
-security = source.resolve(criteria)
+# Resolve a security (None when FT has no match)
+security = source.resolve(SecurityQuery(isin="DE000A0S9GB0"))
+assert security is not None
 print(f"Symbol: {security.symbol}")
 
 # Fetch history
-history = source.history(security.symbol, period="1mo")
-df = history.to_pandas()
-print(df.tail())
+history = source.history(security.symbol, period=HistoryPeriod.MO1)
+print(history.to_pandas().tail())
 
-# Validate price
-is_valid = source.validate(security.symbol, target_date="2025-01-15", target_price=120.50)
+# Validate a price: True when it is within the day's range, or within 10% of the close,
+# on the nearest trading day up to 5 days away; raises PriceVerificationError otherwise
+is_valid = source.validate(security.symbol, target_date=date(2025, 1, 15), target_price=83.50)
 print(f"Price valid: {is_valid}")
 ```
 
 ## Features
 
-- **Robust Resolution**: Searches by ISIN, Symbol, or Description.
-- **Smart Mapping**: Prioritizes results based on preferred exchanges and currency.
-- **Price Validation**: Verifies if a security traded within a range or near a specific price on a given date.
-- **Pandas Integration**: Historical data is easily convertible to Pandas DataFrames.
-- **Modern Python**: Built with Pydantic v2 and async-ready architecture (though currently synchronous).
+- **Robust Resolution**: Searches by ISIN, Symbol, or Description
+- **Price Validation**: Verifies if a security traded within a day's range or near a specific price on a given date
+- **Pandas Integration**: Historical data is easily convertible to Pandas DataFrames
+- **Modern Python**: Built with Pydantic v2, strictly typed

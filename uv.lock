@@ -939,9 +939,12 @@ dependencies = [
     { name = "lxml" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pycountry" },
     { name = "pydantic" },
+    { name = "pydantic-extra-types" },
     { name = "pydantic-market-data" },
     { name = "requests" },
+    { name = "urllib3" },
 ]
 
 [package.optional-dependencies]
@@ -968,10 +971,13 @@ requires-dist = [
     { name = "html5lib", specifier = ">=1.1" },
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "pandas", specifier = ">=2.3.3" },
+    { name = "pycountry", specifier = ">=24.6.1" },
     { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "pydantic-extra-types", specifier = ">=2.11.0" },
     { name = "pydantic-market-data", specifier = ">=0.7.0" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "treaty", marker = "python_full_version >= '3.14' and extra == 'cli'", specifier = "==1.0.0rc19" },
+    { name = "urllib3", specifier = ">=2.6.3" },
 ]
 provides-extras = ["cli"]
 
