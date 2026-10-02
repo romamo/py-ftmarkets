@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - **`FTClient` returns FT's last answer once its status retries run out**: after the retries on 429, 500, 502, 503, and 504, `raise_for_status()` raises an `HTTPError` carrying the status and `Retry-After`, not a `requests.exceptions.RetryError` that has neither (#17)
+- **Dependency**: Bumped `pydantic-market-data` to `>=0.9.0`, whose `ISIN` value object validates itself and is accepted by `Security(isin=...)`; the scraper now builds `ISIN(value)` directly and passes it to `Security` instead of working around the old behaviour. Search results are unchanged
+- **Dependency**: The `cli` extra pins `treaty==1.0.0rc20`
 
 ## [0.8.0] - 2026-10-02
 
