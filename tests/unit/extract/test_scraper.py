@@ -40,7 +40,7 @@ def test_get_xid_extraction(scraper, mock_client):
     assert isinstance(xid, Xid)
     assert xid.root == "123456"
     assert str(xid) == "123456"
-    mock_client.get.assert_called_with("/data/equities/tearsheet/summary?s=TEST:EX")
+    mock_client.get.assert_called_with("/data/equities/tearsheet/summary", params={"s": "TEST:EX"})
 
 
 def test_get_xid_json_error_fallback(scraper, mock_client):

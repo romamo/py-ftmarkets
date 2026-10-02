@@ -29,7 +29,7 @@ uv run ftmarkets --help        # run CLI
 
 3. **`FTDataSource`** (`api.py`) — orchestrates Scraper calls, applies filters (asset class, currency), and validates price against OHLCV history using a ±5-day window and a 5% close tolerance.
 
-4. **CLI** (`cli.py`, `cli_app.py`): a treaty app (Python 3.14+, `cli` extra) with `lookup` and `history` commands. Entry point: `ftmarkets` → `ftmarkets.cli:main`, which checks the Python version and that treaty imports before loading `cli_app`. `create_app(source)` takes the `DataSource`, so `tests/unit/test_cli.py` runs commands through `App.call` against a fake. Run the CLI and its tests with `uv run -p 3.14 --extra cli ...`; audit with `uv run -p 3.14 --extra cli treaty audit ftmarkets.cli_app:app --strict`.
+4. **CLI** (`cli.py`, `cli_app.py`): a treaty app (Python 3.14+, `cli` extra) with `lookup` and `history` commands. Entry point: `ftmarkets` → `ftmarkets.cli:main`, which checks the Python version and that treaty imports before loading `cli_app`. `create_app(source_factory)` takes a `Callable[[NetworkSettings], DataSource]` called once per run with `ctx.network`; the live app uses `ft_source`, which builds `FTClient` from treaty's proxy and CA bundle settings, and `tests/unit/test_cli.py` passes a factory returning a fake and runs commands through `App.call`. Run the CLI and its tests with `uv run -p 3.14 --extra cli ...`; audit with `uv run -p 3.14 --extra cli treaty audit ftmarkets.cli_app:app --strict`.
 
 **Key internal types** (`extract/schemas.py`): `Xid` (FT's internal numeric ID), `ChartRequest`/`ChartResponse` (strict Pydantic models for `/data/chartapi/series`). `Symbol` is imported from `pydantic_market_data.models`.
 

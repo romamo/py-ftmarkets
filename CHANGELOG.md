@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`FTClient(proxies=..., verify=...)`**: a `requests`-style proxy mapping (replacing the proxy environment variables when given, `{}` for a direct connection) and a CA bundle path; `FTClient()` and the shared `client` behave as before (#11)
+
+### Fixed
+- **Query encoding**: `Scraper.get_xid` sends the symbol as an encoded `s` query parameter instead of pasting it into the URL, so a symbol containing `&`, `=`, or `#` no longer adds or cuts parameters (#11)
+- **CLI `--proxy`, `--no-proxy`, and CA bundle**: treaty's network settings (`--proxy`, `--no-proxy`, `HTTP(S)_PROXY`, `NO_PROXY`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`) now reach the `requests.Session` the CLI talks to FT with; before, the flags were advertised but had no effect (#11)
+
 ### Changed
+- **BREAKING: `FTClient.get`/`FTClient.post`** take only a `/`-relative path on markets.ft.com and raise `ValueError` on anything else, such as an absolute URL, which `get` used to fetch as is (#11)
+- **`ftmarkets.cli_app.create_app`** takes a source factory, `Callable[[NetworkSettings], DataSource]`, called once per run with `ctx.network`, instead of a `DataSource`; `ft_source` builds the live FT source (#11)
+- **Dependency**: The `cli` extra pins `treaty==1.0.0rc19` (#11)
 - **Dependency**: Bumped `pydantic-market-data` to `>=0.7.0`
 - **BREAKING: `SecurityQuery.price_on` dates**: `pydantic-market-data` 0.7.0 makes `FlexibleDate` accept only `YYYY-MM-DD`, `YYYY/MM/DD`, or `YYYYMMDD` strings (or `date`/`datetime` objects) and reject impossible dates, so a `SecurityQuery` (re-exported from `ftmarkets.api`) or `PriceOnDate` built from any other date string, such as `15/01/2025`, now raises `ValidationError` before it reaches `FTDataSource.resolve()`. `ftmarkets.utils.parse_date` is unchanged
 - **Search results set `isin` only from a valid ISIN query**: rows of FT's search-results table carry the query as `isin` only when it is a valid ISIN (format and checksum); the other tearsheet links on the page (best matches, which may be unrelated) no longer get it. An exact-match tearsheet takes the ISIN printed on the page, else the query when it is a valid ISIN (#7)

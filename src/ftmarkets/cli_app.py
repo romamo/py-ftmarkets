@@ -1,10 +1,13 @@
 """The ``ftmarkets`` treaty app (Python 3.14+, ``cli`` extra)
 
 Import this module only through ``ftmarkets.cli.main``, which checks the Python version
-and that treaty is installed first. ``create_app`` takes the data source, so tests run
-every command in-process through ``App.call`` against a fake source.
+and that treaty is installed first. ``create_app`` takes a factory that builds the data
+source for each run from treaty's network settings, so ``--proxy``, ``--no-proxy``, and the
+CA bundle reach FT's ``requests.Session``, and tests run every command in-process through
+``App.call`` against a fake source.
 """
 
+from collections.abc import Callable
 from datetime import date
 from importlib.metadata import version
 
@@ -20,9 +23,11 @@ from pydantic_market_data.models import (
     Security,
     SecurityQuery,
 )
-from treaty import App, Ctx, Exit, Page, ParseError, RequiresAny
+from treaty import App, Ctx, Exit, NetworkSettings, Page, ParseError, RequiresAny
 
 from .api import FTDataSource
+from .client import FTClient
+from .extract.scraper import Scraper
 
 # FlexibleDate validates the format; the field is re-declared only so --help names it
 _DATE_FORMATS = "YYYY-MM-DD, YYYY/MM/DD, or YYYYMMDD"
@@ -211,8 +216,27 @@ def _model(cls: type) -> type[BaseModel]:
     return cls
 
 
-def create_app(source: DataSource) -> App:
-    """The ``ftmarkets`` app over ``source``"""
+SourceFactory = Callable[[NetworkSettings], DataSource]
+"""Builds the data source a run uses, from the run's ``ctx.network``"""
+
+
+def ft_client(network: NetworkSettings) -> FTClient:
+    """An ``FTClient`` going out the way treaty resolved for this run: ``--proxy``, else the
+    proxy variables with ``NO_PROXY`` applied to markets.ft.com, none under ``--no-proxy``;
+    TLS verified against ``REQUESTS_CA_BUNDLE``/``SSL_CERT_FILE``, else the system store"""
+    proxy = network.proxy_for(FTClient.BASE_URL)
+    proxies = {} if proxy is None else {"http": proxy, "https": proxy}
+    bundle = network.ca_bundle
+    return FTClient(proxies=proxies, verify=True if bundle is None else str(bundle))
+
+
+def ft_source(network: NetworkSettings) -> FTDataSource:
+    """The live FT data source for one run"""
+    return FTDataSource(Scraper(http_client=ft_client(network)))
+
+
+def create_app(source_factory: SourceFactory) -> App:
+    """The ``ftmarkets`` app; each run builds its source with ``source_factory(ctx.network)``"""
     app = App("ftmarkets", version=version("py-ftmarkets"))
     app.exit_code(
         "PRICE_MISMATCH",
@@ -262,7 +286,7 @@ def create_app(source: DataSource) -> App:
         requires=[RequiresAny(_IDENTIFIERS)],
     )
     def lookup(args: LookupArgs, ctx: Ctx) -> Page[Security]:
-        return run_lookup(source, args, ctx)
+        return run_lookup(source_factory(ctx.network), args, ctx)
 
     @app.command(
         "history",
@@ -282,9 +306,9 @@ def create_app(source: DataSource) -> App:
         requires=[RequiresAny(_IDENTIFIERS)],
     )
     def history(args: HistoryArgs, ctx: Ctx) -> HistoryResult:
-        return run_history(source, args, ctx)
+        return run_history(source_factory(ctx.network), args, ctx)
 
     return app
 
 
-app = create_app(FTDataSource())
+app = create_app(ft_source)

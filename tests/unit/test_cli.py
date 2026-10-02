@@ -17,7 +17,7 @@ from pydantic_market_data.models import (
 
 pytest.importorskip("treaty")
 
-from treaty import Envelope  # noqa: E402
+from treaty import App, Envelope  # noqa: E402
 
 from ftmarkets.api import FTDataSource  # noqa: E402
 from ftmarkets.cli_app import create_app  # noqa: E402
@@ -93,6 +93,11 @@ class FakeSource:
         )
 
 
+def app_over(source: FakeSource) -> App:
+    """The app with every run using ``source``, whatever the network settings"""
+    return create_app(lambda network: source)
+
+
 def error(envelope: Envelope) -> dict:
     found = envelope.to_json()["error"]
     assert isinstance(found, dict)
@@ -112,7 +117,7 @@ def symbols(data: object) -> list[str]:
 
 @pytest.mark.parametrize("command", ["lookup", "history"])
 def test_no_identifier_exits_2_naming_the_rule(command):
-    envelope = create_app(FakeSource(APPLE)).call(command, {})
+    envelope = app_over(FakeSource(APPLE)).call(command, {})
     assert envelope.exit_code == 2
     assert error(envelope)["context"]["rule"] == {"any_of": ["isin", "symbol", "desc"]}
 
@@ -120,7 +125,7 @@ def test_no_identifier_exits_2_naming_the_rule(command):
 @pytest.mark.parametrize("command", ["lookup", "history"])
 def test_price_without_date_exits_2(command):
     source = FakeSource(APPLE)
-    envelope = create_app(source).call(command, {"symbol": "AAPL", "price": 150.0})
+    envelope = app_over(source).call(command, {"symbol": "AAPL", "price": 150.0})
     assert envelope.exit_code == 2
     assert error(envelope)["phase"] == "validation"
     assert error(envelope)["errors"][0]["field"] == "price"
@@ -131,7 +136,7 @@ def test_price_without_date_exits_2(command):
 @pytest.mark.parametrize("value", ["15.01.2025", "15/01/2025", "01/02/2025", "Jan 15 2025"])
 def test_non_year_first_date_exits_2(command, value):
     source = FakeSource(APPLE, matching={"AAPL:NSQ"})
-    envelope = create_app(source).call(command, {"symbol": "AAPL", "price": 150.0, "date": value})
+    envelope = app_over(source).call(command, {"symbol": "AAPL", "price": 150.0, "date": value})
     assert envelope.exit_code == 2
     assert error(envelope)["phase"] == "validation"
     assert error(envelope)["errors"][0]["field"] == "date"
@@ -143,7 +148,7 @@ def test_non_year_first_date_exits_2(command, value):
 @pytest.mark.parametrize("command", ["lookup", "history"])
 @pytest.mark.parametrize("value", ["2025-13-01", "2024-02-30"])
 def test_impossible_date_exits_2(command, value):
-    envelope = create_app(FakeSource(APPLE)).call(
+    envelope = app_over(FakeSource(APPLE)).call(
         command, {"symbol": "AAPL", "price": 150.0, "date": value}
     )
     assert envelope.exit_code == 2
@@ -155,34 +160,34 @@ def test_impossible_date_exits_2(command, value):
 @pytest.mark.parametrize("value", ["2025-01-15", "2025/01/15", "20250115"])
 def test_year_first_date_formats_are_accepted(command, value):
     source = FakeSource(APPLE, matching={"AAPL:NSQ"})
-    envelope = create_app(source).call(command, {"symbol": "AAPL", "price": 150.0, "date": value})
+    envelope = app_over(source).call(command, {"symbol": "AAPL", "price": 150.0, "date": value})
     assert envelope.exit_code == 0
     assert source.validated == ["AAPL:NSQ"]
 
 
 def test_bad_period_exits_2():
     source = FakeSource(APPLE)
-    envelope = create_app(source).call("history", {"symbol": "AAPL", "period": "7y"})
+    envelope = app_over(source).call("history", {"symbol": "AAPL", "period": "7y"})
     assert envelope.exit_code == 2
     assert error(envelope)["errors"][0]["field"] == "period"
     assert source.periods == []
 
 
 def test_lookup_keeps_the_source_order():
-    envelope = create_app(FakeSource(APPLE)).call("lookup", {"isin": "US0378331005", "limit": 0})
+    envelope = app_over(FakeSource(APPLE)).call("lookup", {"isin": "US0378331005", "limit": 0})
     assert envelope.exit_code == 0
     assert symbols(envelope.data) == ["AAPL:NSQ", "0R2V:LSE", "APC:FRA"]
 
 
 def test_lookup_defaults_to_one_result():
-    envelope = create_app(FakeSource(APPLE)).call("lookup", {"isin": "US0378331005"})
+    envelope = app_over(FakeSource(APPLE)).call("lookup", {"isin": "US0378331005"})
     assert symbols(envelope.data) == ["AAPL:NSQ"]
     assert pagination(envelope)["has_more"] is True
     assert pagination(envelope)["total"] == 3
 
 
 def test_lookup_pages_keep_the_source_order():
-    app = create_app(FakeSource(APPLE))
+    app = app_over(FakeSource(APPLE))
     first = app.call("lookup", {"isin": "US0378331005", "limit": 2})
     assert symbols(first.data) == ["AAPL:NSQ", "0R2V:LSE"]
     cursor = pagination(first)["next_cursor"]
@@ -192,7 +197,7 @@ def test_lookup_pages_keep_the_source_order():
 
 
 def test_lookup_cursor_from_other_arguments_exits_2():
-    app = create_app(FakeSource(APPLE))
+    app = app_over(FakeSource(APPLE))
     cursor = pagination(app.call("lookup", {"isin": "US0378331005"}))["next_cursor"]
     envelope = app.call("lookup", {"isin": "US0378331005", "currency": "EUR", "cursor": cursor})
     assert envelope.exit_code == 2
@@ -200,7 +205,7 @@ def test_lookup_cursor_from_other_arguments_exits_2():
 
 
 def test_lookup_filters_by_currency():
-    envelope = create_app(FakeSource(APPLE)).call(
+    envelope = app_over(FakeSource(APPLE)).call(
         "lookup", {"isin": "US0378331005", "currency": "EUR", "limit": 0}
     )
     assert symbols(envelope.data) == ["APC:FRA"]
@@ -212,33 +217,33 @@ INDEX = Security(symbol="DAX:GER", name="DAX", asset_class="index", security_typ
 
 def test_lookup_filters_by_asset_class():
     source = FakeSource([*APPLE, ETF, INDEX])
-    by_class = create_app(source).call("lookup", {"desc": "x", "asset_class": "index", "limit": 0})
+    by_class = app_over(source).call("lookup", {"desc": "x", "asset_class": "index", "limit": 0})
     assert symbols(by_class.data) == ["DAX:GER"]
-    equity = create_app(source).call("lookup", {"desc": "x", "asset_class": "equity", "limit": 0})
+    equity = app_over(source).call("lookup", {"desc": "x", "asset_class": "equity", "limit": 0})
     assert symbols(equity.data) == ["EXS1:GER"]
 
 
 def test_lookup_asset_class_outside_the_enum_exits_2():
-    envelope = create_app(FakeSource([ETF])).call("lookup", {"desc": "x", "asset_class": "ETF"})
+    envelope = app_over(FakeSource([ETF])).call("lookup", {"desc": "x", "asset_class": "ETF"})
     assert envelope.exit_code == 2
     assert error(envelope)["errors"][0]["field"] == "asset-class"
 
 
 def test_lookup_filters_by_security_type_in_any_case():
     source = FakeSource([*APPLE, ETF, INDEX])
-    envelope = create_app(source).call("lookup", {"desc": "x", "security_type": "etf", "limit": 0})
+    envelope = app_over(source).call("lookup", {"desc": "x", "security_type": "etf", "limit": 0})
     assert symbols(envelope.data) == ["EXS1:GER"]
 
 
 def test_lookup_not_found():
-    envelope = create_app(FakeSource([])).call("lookup", {"symbol": "NOPE"})
+    envelope = app_over(FakeSource([])).call("lookup", {"symbol": "NOPE"})
     assert envelope.exit_code == 5
     assert error(envelope)["code"] == "NOT_FOUND"
 
 
 def test_lookup_price_validation_keeps_only_matches():
     source = FakeSource(APPLE, matching={"APC:FRA"})
-    envelope = create_app(source).call(
+    envelope = app_over(source).call(
         "lookup", {"isin": "US0378331005", "price": 150.0, "date": "2025-01-15", "limit": 0}
     )
     assert envelope.exit_code == 0
@@ -249,7 +254,7 @@ def test_lookup_price_validation_keeps_only_matches():
 
 def test_lookup_price_validation_stops_at_the_limit():
     source = FakeSource(APPLE, matching={"AAPL:NSQ", "APC:FRA"})
-    envelope = create_app(source).call(
+    envelope = app_over(source).call(
         "lookup", {"isin": "US0378331005", "price": 150.0, "date": "2025-01-15"}
     )
     assert symbols(envelope.data) == ["AAPL:NSQ"]
@@ -259,7 +264,7 @@ def test_lookup_price_validation_stops_at_the_limit():
 
 def test_lookup_price_validation_next_page_resumes_the_scan():
     source = FakeSource(APPLE, matching={"AAPL:NSQ", "APC:FRA"})
-    app = create_app(source)
+    app = app_over(source)
     query = {"isin": "US0378331005", "price": 150.0, "date": "2025-01-15"}
     cursor = pagination(app.call("lookup", query))["next_cursor"]
     second = app.call("lookup", {**query, "cursor": cursor})
@@ -271,7 +276,7 @@ def test_lookup_price_validation_next_page_resumes_the_scan():
 
 def test_lookup_price_validation_last_page_may_be_empty():
     source = FakeSource(APPLE, matching={"AAPL:NSQ"})
-    app = create_app(source)
+    app = app_over(source)
     query = {"isin": "US0378331005", "price": 150.0, "date": "2025-01-15"}
     cursor = pagination(app.call("lookup", query))["next_cursor"]
     second = app.call("lookup", {**query, "cursor": cursor})
@@ -281,7 +286,7 @@ def test_lookup_price_validation_last_page_may_be_empty():
 
 
 def test_lookup_price_validation_without_a_match_is_not_found():
-    envelope = create_app(FakeSource(APPLE)).call(
+    envelope = app_over(FakeSource(APPLE)).call(
         "lookup", {"isin": "US0378331005", "price": 150.0, "date": "20250115"}
     )
     assert envelope.exit_code == 5
@@ -338,7 +343,7 @@ def test_history_price_check_errors_propagate_from_resolve(failure):
 
 def test_history_returns_security_and_ordered_candles():
     source = FakeSource(APPLE)
-    envelope = create_app(source).call("history", {"symbol": "AAPL", "period": "1y"})
+    envelope = app_over(source).call("history", {"symbol": "AAPL", "period": "1y"})
     assert envelope.exit_code == 0
     assert source.periods == [HistoryPeriod.Y1]
     assert envelope.data["security"]["symbol"] == "AAPL:NSQ"
@@ -348,14 +353,14 @@ def test_history_returns_security_and_ordered_candles():
 
 
 def test_history_not_found():
-    envelope = create_app(FakeSource([])).call("history", {"symbol": "NOPE"})
+    envelope = app_over(FakeSource([])).call("history", {"symbol": "NOPE"})
     assert envelope.exit_code == 5
     assert error(envelope)["code"] == "NOT_FOUND"
 
 
 def test_history_price_validation_passes():
     source = FakeSource(APPLE, matching={"AAPL:NSQ"})
-    envelope = create_app(source).call(
+    envelope = app_over(source).call(
         "history", {"symbol": "AAPL", "price": 150.0, "date": "2025-01-15"}
     )
     assert envelope.exit_code == 0
@@ -366,7 +371,7 @@ def test_history_price_validation_passes():
 def test_history_price_mismatch_on_resolved_security():
     # resolve() matches on the price but validate() disagrees
     source = FakeSource(APPLE, priced={"AAPL:NSQ"})
-    envelope = create_app(source).call(
+    envelope = app_over(source).call(
         "history", {"symbol": "AAPL", "price": 150.0, "date": "2025-01-15"}
     )
     assert envelope.exit_code == 79
@@ -375,7 +380,7 @@ def test_history_price_mismatch_on_resolved_security():
 
 
 def test_history_price_mismatch_when_no_candidate_trades_near_the_price():
-    envelope = create_app(FakeSource(APPLE)).call(
+    envelope = app_over(FakeSource(APPLE)).call(
         "history", {"symbol": "AAPL", "price": 150.0, "date": "2025-01-15"}
     )
     assert envelope.exit_code == 79
