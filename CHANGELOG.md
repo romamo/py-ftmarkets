@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.7.0] - 2026-10-02
 
 ### Added
 - **CLI `lookup --security-type`**: matches FT's security type (`ETF`, `Fund`, `Equity`, `Index`) case-insensitively; it takes over the FT-category half of the old `--asset-class` (#4)
