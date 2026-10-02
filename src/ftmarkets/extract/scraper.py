@@ -303,7 +303,11 @@ class Scraper:
 
         if not xid_str:
             # Method B: Regex fallback
-            regex = r'(?:xid|&quot;xid&quot;)\s*[:=]\s*(?:["\']|&quot;)?(\d+)(?:["\']|&quot;)?'
+            # xid: 123, xid=123, "xid": "123", 'xid':123, &quot;xid&quot;:&quot;123&quot;
+            regex = (
+                r'(?:"xid"|\'xid\'|&quot;xid&quot;|xid)\s*[:=]\s*'
+                r'(?:["\']|&quot;)?(\d+)(?:["\']|&quot;)?'
+            )
             match = re.search(regex, resp.text)
             if match:
                 xid_str = match.group(1)

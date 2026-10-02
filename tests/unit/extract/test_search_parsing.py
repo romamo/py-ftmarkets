@@ -153,7 +153,7 @@ def test_get_xid_from_data_mod_config():
     fake = FakeClient(page=page)
     xid = Scraper(http_client=fake).get_xid(Symbol(root="AAPL:NSQ"))  # type: ignore[arg-type]
     assert xid.root == "123456"
-    assert fake.calls == [("/data/equities/tearsheet/summary?s=AAPL:NSQ", None)]
+    assert fake.calls == [("/data/equities/tearsheet/summary", {"s": "AAPL:NSQ"})]
 
 
 def test_get_xid_falls_back_to_regex():

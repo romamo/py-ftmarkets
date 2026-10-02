@@ -7,10 +7,6 @@ All notable changes to this project will be documented in this file.
 ### Added
 - **`FTClient(proxies=..., verify=...)`**: a `requests`-style proxy mapping (replacing the proxy environment variables when given, `{}` for a direct connection) and a CA bundle path; `FTClient()` and the shared `client` behave as before (#11)
 
-### Fixed
-- **Query encoding**: `Scraper.get_xid` sends the symbol as an encoded `s` query parameter instead of pasting it into the URL, so a symbol containing `&`, `=`, or `#` no longer adds or cuts parameters (#11)
-- **CLI `--proxy`, `--no-proxy`, and CA bundle**: treaty's network settings (`--proxy`, `--no-proxy`, `HTTP(S)_PROXY`, `NO_PROXY`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`) now reach the `requests.Session` the CLI talks to FT with; before, the flags were advertised but had no effect (#11)
-
 ### Changed
 - **BREAKING: `FTClient.get`/`FTClient.post`** take only a `/`-relative path on markets.ft.com and raise `ValueError` on anything else, such as an absolute URL, which `get` used to fetch as is (#11)
 - **`ftmarkets.cli_app.create_app`** takes a source factory, `Callable[[NetworkSettings], DataSource]`, called once per run with `ctx.network`, instead of a `DataSource`; `ft_source` builds the live FT source (#11)
@@ -35,6 +31,9 @@ All notable changes to this project will be documented in this file.
 - **A tearsheet stating an invalid ISIN** now raises `ScraperError` naming the value instead of a `Security` `ValidationError` (#7)
 - **`FTDataSource.history(period=HistoryPeriod.YTD)`** fetched 30 days; it now fetches the days since 1 January. An unmapped period raises `KeyError` instead of falling back to 30 days (#9)
 - **CLI `--date`**: still accepts the same three formats and still exits 2 on anything else, but the check is now `pydantic-market-data`'s `FlexibleDate` instead of the CLI's own; the error message reads `Invalid date: '15/01/2025'; expected YYYY-MM-DD, YYYY/MM/DD or YYYYMMDD`
+- **Query encoding**: `Scraper.get_xid` sends the symbol as an encoded `s` query parameter instead of pasting it into the URL, so a symbol containing `&`, `=`, or `#` no longer adds or cuts parameters (#11)
+- **CLI `--proxy`, `--no-proxy`, and CA bundle**: treaty's network settings (`--proxy`, `--no-proxy`, `HTTP(S)_PROXY`, `NO_PROXY`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`) now reach the `requests.Session` the CLI talks to FT with; before, the flags were advertised but had no effect (#11)
+- **XID regex fallback**: `Scraper.get_xid` also finds a quoted JSON key, `"xid": "123"` or `"xid":123`, when the tearsheet's `data-mod-config` does not hold it; the fallback matched only `xid:`, `xid=`, and `&quot;xid&quot;` (#11)
 
 ## [0.7.0] - 2026-10-02
 

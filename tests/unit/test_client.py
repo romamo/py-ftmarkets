@@ -33,6 +33,23 @@ def test_get_xid_encodes_the_symbol(record_ft):
     ]
 
 
+@pytest.mark.parametrize(
+    "script",
+    [
+        'window.config = {"symbol": "X", "xid": "987654"};',
+        'window.config = {"xid":987654};',
+        "window.config = {'xid': '987654'};",
+        "var xid = 987654;",
+    ],
+)
+def test_get_xid_regex_fallback_finds_the_xid_in_a_script(script, record_ft):
+    """No data-mod-config: the XID comes from the page's script, JSON keys quoted or not"""
+    client = FTClient()
+    record_ft(client, f"<html><body><script>{script}</script></body></html>".encode())
+
+    assert Scraper(http_client=client).get_xid(Symbol(root="X")).root == "987654"
+
+
 def test_search_encodes_the_query(record_ft):
     client = FTClient()
     adapter = record_ft(client, b"<html><body></body></html>")
