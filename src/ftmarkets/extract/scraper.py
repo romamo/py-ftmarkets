@@ -11,7 +11,7 @@ from lxml.html import HtmlElement
 from pydantic import ValidationError
 from pydantic_extra_types.country import CountryAlpha2
 from pydantic_extra_types.currency_code import Currency
-from pydantic_market_data.models import ISIN, OHLCV, AssetClass, History, Security, validate_isin
+from pydantic_market_data.models import ISIN, OHLCV, AssetClass, History, Security
 
 from ..client import FTClient, client
 from .schemas import (
@@ -178,8 +178,7 @@ class Scraper:
             currency=currency,
             asset_class=asset_class,
             security_type=security_type,
-            # pmd Security validates isin with str methods, so it takes the root
-            isin=isin.root if isin else None,
+            isin=isin,
         )
         results.append(sec)
 
@@ -218,8 +217,7 @@ class Scraper:
             Security(
                 symbol=symbol_code,
                 name=name,
-                # pmd Security validates isin with str methods, so it takes the root
-                isin=isin_val.root if isin_val else None,
+                isin=isin_val,
                 asset_class=asset_class,
                 security_type=security_type,
             )
@@ -498,10 +496,9 @@ class Scraper:
     def _parse_isin(value: str) -> ISIN | None:
         """The value as an `ISIN` if it is one (format and checksum), else None."""
         try:
-            cleaned = validate_isin(value)
-        except ValueError:
+            return ISIN(value)
+        except ValidationError:
             return None
-        return ISIN(root=cleaned) if cleaned else None
 
 
 # Singleton instance not strictly needed but useful for API
