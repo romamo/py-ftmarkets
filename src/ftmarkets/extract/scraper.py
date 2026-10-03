@@ -2,7 +2,7 @@ import html as html_lib
 import json
 import logging
 import re
-from typing import cast
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -10,7 +10,7 @@ from lxml import html
 from lxml.html import HtmlElement
 from pydantic import ValidationError
 from pydantic_extra_types.country import CountryAlpha2
-from pydantic_extra_types.currency_code import Currency
+from pydantic_market_data import QuoteCurrency
 from pydantic_market_data.models import ISIN, OHLCV, AssetClass, History, Security
 
 from ..client import FTClient, client
@@ -169,7 +169,13 @@ class Scraper:
         isin: ISIN | None,
     ) -> None:
         country_code = self._map_country_to_code(country)
-        currency = self._extract_currency(symbol) or self._map_country_to_currency(country_code)
+        currency = self._extract_currency(symbol)
+        if currency is None and country_code == "GB" and asset_class is not AssetClass.INDEX:
+            # FT quotes UK lines in pence (GBX) or pounds (GBP), and the results page does
+            # not say which unless the symbol carries it: the line's tearsheet states it
+            currency = self._tearsheet_currency(self._fetch_tearsheet(Symbol(root=symbol))[0])
+        elif currency is None:
+            currency = self._map_country_to_currency(country_code)
 
         sec = Security(
             symbol=symbol,
@@ -198,6 +204,13 @@ class Scraper:
 
         name_el = tree.xpath('//h1[@class="mod-tearsheet-overview__header__name"]')
         name = name_el[0].text_content().strip() if name_el else query
+        exchange, country = self._tearsheet_listing(tree, symbol_code)
+        country_code = self._map_country_to_code(country)
+        # The quote currency the page states (pence as GBX), else the symbol's suffix, else
+        # the country's currency, except for the UK, where FT quotes in GBX or GBP
+        currency = self._tearsheet_currency(tree) or self._extract_currency(symbol_code)
+        if currency is None and country_code != "GB":
+            currency = self._map_country_to_currency(country_code)
 
         # FT redirects to the tearsheet on an exact match, so an ISIN query names this
         # security; an ISIN printed on the page takes precedence over the query
@@ -218,6 +231,9 @@ class Scraper:
             Security(
                 symbol=symbol_code,
                 name=name,
+                exchange=exchange,
+                country=cast(CountryAlpha2 | None, country_code),
+                currency=currency,
                 isin=isin_val,
                 asset_class=asset_class,
                 security_type=security_type,
@@ -229,7 +245,8 @@ class Scraper:
         Fetch historical data using the strict Chart API schemas.
         """
         symbol_val = Symbol(root=symbol) if isinstance(symbol, str) else symbol
-        xid = self.get_xid(symbol_val)
+        tree, text = self._fetch_tearsheet(symbol_val)
+        xid = self._xid_from_tearsheet(tree, text, symbol_val)
 
         # Clean xid (remove quotes if present)
         # xid is a strictly typed Xid, convert to string for manipulation if needed,
@@ -262,12 +279,16 @@ class Scraper:
         except (requests.exceptions.JSONDecodeError, ValidationError) as e:
             raise ScraperError(f"Malformed chart response for {symbol_val.root}: {e}") from e
 
-        return self._convert_to_history(symbol_val, chart_data)
+        return self._convert_to_history(symbol_val, chart_data, self._tearsheet_currency(tree))
 
     def get_xid(self, symbol: Symbol) -> Xid:
         """
         Extract internal XID for a ticker.
         """
+        return self._xid_from_tearsheet(*self._fetch_tearsheet(symbol), symbol)
+
+    def _fetch_tearsheet(self, symbol: Symbol) -> tuple[HtmlElement, str]:
+        """The symbol's tearsheet page, parsed and as text."""
         url_summary = "/data/equities/tearsheet/summary"
         # Note: Valid for Equities/ETFs/Indices usually, if not we might need adaptive URLs
         # But commonly ?s=TICKER works for lookup or redirects
@@ -278,9 +299,41 @@ class Scraper:
             if resp.status_code == 400:
                 logger.debug("HTTP 400 Error for %s: %s", url_summary, resp.text)
             raise e
+        return cast(HtmlElement, html.fromstring(resp.content)), resp.text
 
-        tree = html.fromstring(resp.content)
+    @staticmethod
+    def _mod_configs(tree: HtmlElement, word: str) -> list[dict[str, Any]]:
+        """
+        The JSON objects among the page's ``data-mod-config`` attributes that mention
+        ``word``, in page order.
 
+        Configs that never mention ``word`` belong to unrelated modules and are skipped
+        unparsed. One that mentions it but is not JSON raises ScraperError (FT changed its
+        markup); one that is JSON but not an object (an ETF's holdings list) is skipped.
+        """
+        pattern = re.compile(rf"\b{re.escape(word)}\b")
+        configs: list[dict[str, Any]] = []
+        divs = cast(list[Any], tree.xpath("//div[@data-mod-config] | //section[@data-mod-config]"))
+        for div in divs:
+            raw_cfg = cast(HtmlElement, div).get("data-mod-config")
+            if not raw_cfg:
+                continue
+            # lxml unescapes attributes once; FT may escape the JSON a second time
+            decoded_cfg = html_lib.unescape(raw_cfg)
+            if not pattern.search(decoded_cfg):
+                continue
+            try:
+                cfg = json.loads(decoded_cfg)
+            except json.JSONDecodeError as e:
+                raise ScraperError(
+                    f"Tearsheet has a data-mod-config that is not JSON: {decoded_cfg[:200]!r}"
+                ) from e
+            if isinstance(cfg, dict):
+                configs.append(cfg)
+        return configs
+
+    def _xid_from_tearsheet(self, tree: HtmlElement, text: str, symbol: Symbol) -> Xid:
+        # Method A: data-mod-config
         xid_str = self._xid_from_mod_configs(tree, symbol)
 
         if not xid_str:
@@ -290,7 +343,7 @@ class Scraper:
                 r'(?:"xid"|\'xid\'|&quot;xid&quot;|\bxid)\s*[:=]\s*'
                 r'(?:["\']|&quot;)?(\d+)(?:["\']|&quot;)?'
             )
-            match = re.search(regex, resp.text)
+            match = re.search(regex, text)
             if match:
                 xid_str = match.group(1)
 
@@ -347,7 +400,51 @@ class Scraper:
             return str(xid)
         return None
 
-    def _convert_to_history(self, symbol: Symbol, data: ChartResponse) -> History:
+    def _tearsheet_currency(self, tree: HtmlElement) -> QuoteCurrency | None:
+        """
+        The quote currency the tearsheet states, None if it states none.
+
+        FT puts it in the quote module's ``data-mod-config`` (``"currency": "GBX"`` for a
+        line quoted in pence) and in the "Price (GBX)" label; the config wins.
+        """
+        for cfg in self._mod_configs(tree, "currency"):
+            if "currency" in cfg:
+                return self._quote_currency(cfg["currency"])
+        for label in tree.xpath('//span[contains(@class, "mod-ui-data-list__label")]'):
+            match = re.fullmatch(r"Price \(([A-Za-z]+)\)", label.text_content().strip())
+            if match:
+                return self._quote_currency(match.group(1))
+        return None
+
+    @staticmethod
+    def _quote_currency(raw: object) -> QuoteCurrency:
+        if not isinstance(raw, str):
+            raise ScraperError(f"Tearsheet states a currency that is not a code: {raw!r}")
+        try:
+            return QuoteCurrency(raw)
+        except ValueError as e:
+            raise ScraperError(f"Tearsheet states an unknown currency: {raw!r}") from e
+
+    @staticmethod
+    def _tearsheet_listing(tree: HtmlElement, symbol: str) -> tuple[str | None, str | None]:
+        """
+        ``(exchange, country)`` of ``symbol`` from the tearsheet's symbol menu, which lists
+        an equity's listings under country headings; ``(None, None)`` if it is not listed.
+        """
+        country: str | None = None
+        items = tree.xpath('//div[contains(@class, "mod-ui-symbol-chain")]//ul/li')
+        for item in items:
+            if "mod-ui-symbol-chain__country" in (item.get("class") or ""):
+                country = item.text_content().strip() or None
+                continue
+            spans = item.xpath("./a/span")
+            if len(spans) >= 2 and spans[0].text_content().strip() == symbol:
+                return spans[1].text_content().strip() or None, country
+        return None, None
+
+    def _convert_to_history(
+        self, symbol: Symbol, data: ChartResponse, currency: QuoteCurrency | None
+    ) -> History:
         """
         Convert strictly typed API response to pydantic-market-data History.
 
@@ -357,7 +454,7 @@ class Scraper:
         may be missing (volume is then None), but a Volume series present must match the
         dates too. Anything else raises ScraperError.
         """
-        security = Security(symbol=symbol, name=symbol.root)
+        security = Security(symbol=symbol, name=symbol.root, currency=currency)
         count = len(data.dates)
 
         price_el = next((e for e in data.elements if e.type == ChartElementType.PRICE), None)
@@ -447,7 +544,7 @@ class Scraper:
         except LookupError:
             return None
 
-    def _extract_currency(self, ticker: str) -> Currency | None:
+    def _extract_currency(self, ticker: str) -> QuoteCurrency | None:
         parts = ticker.split(":")
         if len(parts) >= 2:
             # Check last or second to last part for currency
@@ -471,13 +568,15 @@ class Scraper:
                 "INR",
                 "CNY",
                 "KRW",
+                # Minor units: pence, South African cents, agorot
+                "GBX",
+                "ZAC",
+                "ILA",
             }
             for p in reversed(parts):
                 p_up = p.upper()
-                if p_up == "GBX":
-                    return cast(Currency, "GBP")
                 if p_up in known_currencies:
-                    return cast(Currency, p_up)
+                    return QuoteCurrency(p_up)
 
             # Heuristic: if 3 parts and last is 3 letters, assume currency if not known exchange
             if len(parts) >= 3:
@@ -495,10 +594,10 @@ class Scraper:
                         "LIS",
                         "LON",
                     }:
-                        return cast(Currency, last)
+                        return cast(QuoteCurrency, last)
         return None
 
-    def _map_country_to_currency(self, country_code: str | None) -> Currency | None:
+    def _map_country_to_currency(self, country_code: str | None) -> QuoteCurrency | None:
         if not country_code:
             return None
         mapping = {
@@ -526,7 +625,7 @@ class Scraper:
             "IN": "INR",
         }
         curr = mapping.get(country_code)
-        return cast(Currency, curr) if curr else None
+        return QuoteCurrency(curr) if curr else None
 
     @staticmethod
     def _parse_isin(value: str) -> ISIN | None:

@@ -211,6 +211,29 @@ def test_lookup_filters_by_currency():
     assert symbols(envelope.data) == ["APC:FRA"]
 
 
+VODAFONE = [
+    Security(symbol="VOD:LSE", name="Vodafone", currency="GBX", country="GB"),
+    Security(symbol="VUSA:LSE:GBP", name="Vanguard", currency="GBP", country="GB"),
+    Security(symbol="VOD:NSQ", name="Vodafone", currency="USD", country="US"),
+]
+
+
+def test_lookup_currency_gbx_keeps_pence_lines():
+    # GBX is in the --currency schema enum on pydantic-market-data 0.9 (#8)
+    envelope = app_over(FakeSource(VODAFONE)).call(
+        "lookup", {"desc": "Vodafone", "currency": "GBX", "limit": 0}
+    )
+    assert envelope.exit_code == 0
+    assert symbols(envelope.data) == ["VOD:LSE"]
+
+
+def test_lookup_currency_gbp_skips_pence_lines():
+    envelope = app_over(FakeSource(VODAFONE)).call(
+        "lookup", {"desc": "Vodafone", "currency": "GBP", "limit": 0}
+    )
+    assert symbols(envelope.data) == ["VUSA:LSE:GBP"]
+
+
 ETF = Security(symbol="EXS1:GER", name="iShares", asset_class="equity", security_type="ETF")
 INDEX = Security(symbol="DAX:GER", name="DAX", asset_class="index", security_type="Index")
 

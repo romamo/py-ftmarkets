@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - **`FTClient` returns FT's last answer once its status retries run out**: after the retries on 429, 500, 502, 503, and 504, `raise_for_status()` raises an `HTTPError` carrying the status and `Retry-After`, not a `requests.exceptions.RetryError` that has neither (#17)
+- **BREAKING: London lines FT quotes in pence are labelled `GBX`**, not `GBP`; prices stay FT's numbers (pence). FT's results page names no currency for a UK line unless its symbol carries one, so `search()` reads the currency each such line's tearsheet states (one extra request per UK line without a currency suffix; UK indices keep `GBP` without a fetch), and a `:GBX` symbol suffix now means `GBX` instead of `GBP`. Lines FT quotes in pounds (`VUSA:LSE:GBP`, or a tearsheet stating `GBP`) stay `GBP`; a UK line whose tearsheet states no currency gets none instead of `GBP`. So `lookup --currency GBP` and `SecurityQuery(currency="GBP")` no longer match pence-quoted lines such as `VOD:LSE`; use `--currency GBX` (#8)
+- **`get_history()`'s `History.security.currency`** is the currency the tearsheet states, read from the tearsheet it already fetches for the XID; it used to be unset (#8)
 - **Dependency**: Bumped `pydantic-market-data` to `>=0.9.0`, whose `ISIN` value object validates itself and is accepted by `Security(isin=...)`; the scraper now builds `ISIN(value)` directly and passes it to `Security` instead of working around the old behaviour. Search results are unchanged
 - **Dependency**: The `cli` extra pins `treaty==1.0.0rc20`
 
@@ -18,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - **BREAKING: `Scraper.get_xid()` raises `ScraperError` on a malformed `xid` config**: a `data-mod-config` that mentions `xid` must be a JSON object whose `xid`, when present, is a non-empty string or an integer. Such a config that is not JSON, not an object, or holds a `null` or other-typed `xid` used to be skipped at debug level, raise a raw `TypeError`, or yield the XID `"None"`. Configs of other modules (no `xid`) are still skipped, and an object without a top-level `xid` still falls back to the regex (#19)
 - **`Scraper.get_xid()` regex fallback** no longer reads an `xid` inside a longer name, such as `var maxid = 42;` (#19)
 - **BREAKING: `FTDataSource.resolve()` applies `SecurityQuery.symbol` alongside `figi` or `isin`**: it keeps only the FIGI or ISIN hits whose symbol matches, ignoring case (an exact match first, else a listing the symbol's `:`-separated parts begin, so `4GLD:LSE` matches `4GLD:LSE:GBX` but `4GLD:LSE:GBX` does not match `4GLD:LSE`); with none, it tries the ISIN after the FIGI, then searches the symbol itself. It used to take the first FIGI or ISIN hit and ignore the symbol, e.g. `4GLD:GER:EUR` for `isin="DE000A0S9GB0", symbol="4GLD:LSE:GBX"`. A query with only one of them is unchanged (#20)
+- **An exact-match tearsheet result had no currency, exchange, or country**, so `resolve(SecurityQuery(symbol="AAPL:NSQ:USD", currency="USD"))` and `history --exchange` dropped the only candidate. It now takes the currency the tearsheet states, else the symbol's suffix, else the country's currency (none for a UK line), and the exchange and country from the tearsheet's symbol menu where FT shows one (equities) (#8)
 
 ## [0.8.0] - 2026-10-02
 

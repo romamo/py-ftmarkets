@@ -34,7 +34,7 @@ uv run ftmarkets --help        # run CLI
 
 **Key internal types** (`extract/schemas.py`): `Xid` (FT's internal numeric ID), `ChartRequest`/`ChartResponse` (strict Pydantic models for `/data/chartapi/series`). `Symbol` is imported from `pydantic_market_data.models`.
 
-**Scraper is the fragile part.** When FT changes its website structure, `_parse_search_results`, `_parse_tearsheet_as_search_result`, and `get_xid` are the methods to update. Verify with the `live` tests against `markets.ft.com`.
+**Scraper is the fragile part.** When FT changes its website structure, `_parse_search_results`, `_parse_tearsheet_as_search_result`, `_xid_from_tearsheet`, `_tearsheet_currency` (the quote currency, pence as `GBX`, from the tearsheet's `data-mod-config` or its "Price (GBX)" label), and `_tearsheet_listing` (exchange and country from the symbol menu) are the methods to update. Verify with the `live` tests against `markets.ft.com`.
 
 ## Testing
 

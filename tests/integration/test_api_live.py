@@ -82,3 +82,11 @@ def test_validate_older_date():
 
     is_valid = ds.validate(symbol, target_date, target_price)
     assert is_valid is True
+
+
+def test_pence_line_is_labelled_gbx():
+    # FT quotes VOD:LSE in pence and states it on the tearsheet (#8)
+    ds = api.FTDataSource()
+    vod = next(r for r in ds.search("VOD:LSE") if str(r.symbol) == "VOD:LSE")
+    assert str(vod.currency) == "GBX"
+    assert str(ds.history(Symbol(root="VOD:LSE")).security.currency) == "GBX"
