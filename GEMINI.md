@@ -34,11 +34,11 @@ uv run ftmarkets --help        # run CLI
 
 **Key internal types** (`extract/schemas.py`): `Xid` (FT's internal numeric ID), `ChartRequest`/`ChartResponse` (strict Pydantic models for `/data/chartapi/series`). `Symbol` is imported from `pydantic_market_data.models`.
 
-**Scraper is the fragile part.** When FT changes its website structure, `_parse_search_results`, `_parse_tearsheet_as_search_result`, and `get_xid` are the methods to update. Verify with the `live` tests against `markets.ft.com`.
+**Scraper is the fragile part.** When FT changes its website structure, `_parse_search_results`, `_parse_tearsheet_as_search_result`, `_xid_from_tearsheet`, `_tearsheet_currency` (the quote currency, pence as `GBX`, from the tearsheet's `data-mod-config` or its "Price (GBX)" label), and `_tearsheet_listing` (exchange and country from the symbol menu) are the methods to update. Verify with the `live` tests against `markets.ft.com`.
 
 ## Testing
 
-- `tests/unit/`: offline tests; the default `uv run pytest` runs them. Fakes are injected through constructors (`Scraper(http_client=...)`, `FTDataSource(scraper_instance=...)`), never patched in. `test_readme.py` runs the README's Python example against a fake scraper
+- `tests/unit/`: offline tests; the default `uv run pytest` runs them. Fakes are injected through constructors (`Scraper(http_client=...)`, `FTDataSource(scraper_instance=...)`), never patched in; no `MagicMock` or `monkeypatch`. `conftest.py`'s `record_ft`/`serve_ft` fixtures mount a `RecordingAdapter` on a real `FTClient`'s session that answers canned FT pages (by path, with status and redirect URL) and records each request. `test_readme.py` runs the README's Python example against a fake scraper
 - `tests/unit/test_cli.py`: the treaty CLI through `App.call`; it needs Python 3.14 and the `cli` extra (`uv run -p 3.14 --extra cli pytest`) and is skipped elsewhere
 - `tests/integration/test_api_live.py`: hits live markets.ft.com, marked `live` and deselected by `addopts`; run with `uv run pytest -m live`, or the manual `Live` workflow (`.github/workflows/live.yml`). Use sparingly to avoid rate limiting
 - `tests/smoke_test.py`: an import check `publish.yml` runs against the built wheel and sdist
