@@ -291,9 +291,10 @@ def test_search_parsing_funds_and_etfs(scraper, mock_client):
 
 
 def test_extract_currency_heuristics(scraper):
+    # FT's GBX suffix means pence, kept as GBX (#8)
     res = scraper._extract_currency("TICKER:GBX")
     assert res is not None
-    assert str(res) == "GBP"
+    assert str(res) == "GBX"
 
     res2 = scraper._extract_currency("AAA:BBB:CCC")
     assert res2 is not None
