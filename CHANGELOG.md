@@ -19,8 +19,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - **README**: `validate()` returns `False` when FT has no trading day within 5 days of the date, and raises `PriceVerificationError` only when that day exists and the price misses its range and close; the README said it raised whenever the price did not match (#22)
 - **GEMINI.md** mirrors CLAUDE.md (the treaty CLI, the test layout) instead of describing the removed pydantic-settings CLI (#22)
-
-### Fixed
 - **`Scraper.get_history()` raises `ScraperError` on chart dates `History` rejects**: duplicate, out-of-order, or mixed-timezone `Dates` used to raise a raw pydantic `ValidationError` (#19)
 - **`Scraper.search()` detects an exact-match tearsheet by the URL path only**: a query containing "tearsheet", such as `search("tearsheet")`, used to be parsed as a tearsheet and return `[]` (#19)
 - **BREAKING: `Scraper.get_xid()` raises `ScraperError` on a malformed `xid` config**: a `data-mod-config` that mentions `xid` must be a JSON object whose `xid`, when present, is a non-empty string or an integer. Such a config that is not JSON, not an object, or holds a `null` or other-typed `xid` used to be skipped at debug level, raise a raw `TypeError`, or yield the XID `"None"`. Configs of other modules (no `xid`) are still skipped, and an object without a top-level `xid` still falls back to the regex (#19)
