@@ -106,3 +106,10 @@ def test_no_dates_is_no_data(elements):
 def test_malformed_response_raises(chart, message):
     with pytest.raises(ScraperError, match=message):
         _history(chart)
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_price_raises(token):
+    chart = json.dumps({"Dates": _DATES, "Elements": [_price(2)]}).replace("101.0", token, 1)
+    with pytest.raises(ScraperError, match="finite number"):
+        _history(chart.encode())

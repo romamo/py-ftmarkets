@@ -28,7 +28,7 @@ dependencies = [
     "pydantic-extra-types>=2.11.0",
     "requests>=2.32.5",
     "urllib3>=2.6.3",
-    "pydantic-market-data>=0.9.0",
+    "pydantic-market-data>=0.10.0",
 ]
 
 [project.optional-dependencies]
